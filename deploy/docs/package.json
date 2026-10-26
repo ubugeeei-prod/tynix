@@ -9,7 +9,7 @@
     "check": "cf deploy --dry-run"
   },
   "devDependencies": {
-    "cf": "1.0.0-beta.12",
-    "wrangler": "4.147.0"
+    "cf": "1.0.0-beta.20",
+    "wrangler": "4.152.0"
   }
 }
