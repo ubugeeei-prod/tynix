@@ -19,6 +19,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHighlighterCore, type HighlighterCore } from "@shikijs/core";
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
+import { processNavigation } from "./navigation.ts";
 import { tynixGrammar } from "./tynix-grammar.ts";
 
 // Shiki needs concrete colours, so the theme paints each token class with a
@@ -192,7 +193,7 @@ export async function processSite(outDir: string): Promise<number> {
   let count = 0;
   for await (const file of htmlFiles(outDir)) {
     const html = await readFile(file, "utf8");
-    const next = await processCodeBlocks(html);
+    const next = processNavigation(await processCodeBlocks(html));
     if (next !== html) {
       await writeFile(file, next);
       count++;

@@ -91,6 +91,6 @@ that root. You will rely on that in step 6.
 
 <div class="tx-pager">
 
-[← Tutorial overview](./index.md) [2. Your first file →](./first-file.md)
+[← Tutorial overview](/tutorial/) [2. Your first file →](./first-file.md)
 
 </div>

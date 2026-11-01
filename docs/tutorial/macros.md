@@ -169,6 +169,6 @@ produce an ill-typed program.
 
 <div class="tx-pager">
 
-[← 15. Dependent and opaque types](./dependent-types.md) [Tutorial overview](./index.md)
+[← 15. Dependent and opaque types](./dependent-types.md) [Tutorial overview](/tutorial/)
 
 </div>

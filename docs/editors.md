@@ -110,7 +110,7 @@ run `vp ide` from a tynix checkout.
 `*.tynix` and `*.d.tynix`, then starts `tynix-lsp` in one of three ways, whichever
 is available first:
 
-1. `require("tynix").setup(...)` when the [editors/neovim](../editors/neovim/README.md)
+1. `require("tynix").setup(...)` when the [editors/neovim](https://github.com/ubugeeei-prod/tynix/blob/main/editors/neovim/README.md)
    plugin is on the runtimepath;
 2. `vim.lsp.config` and `vim.lsp.enable` (Neovim 0.11+);
 3. a `FileType` autocmd that calls `vim.lsp.start` (Neovim 0.10).

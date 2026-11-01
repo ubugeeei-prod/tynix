@@ -127,7 +127,7 @@ Rules:
 ## Color
 
 The palette comes straight from the mark. **Nix blues** carry links, buttons
-and focus; **Haskell purples** appear in the mark, the hero glow and
+and focus; **Haskell purples** appear in the mark and
 "important" callouts. **Annotation Amber** has one job: it marks type-only
 syntax, everything the compiler erases. Surfaces are cool neutrals around the
 mark's ink tile, never cream or pure black.
@@ -191,7 +191,6 @@ All text pairings meet WCAG 2.2 AA (4.5:1 for body text); most meet AAA.
 | `#E4E9F4` on Ink 950 | 15.83:1 |
 | Slate 300 on Ink 950 | 7.87:1 |
 | `#93B4EE` on Ink 950 (dark-mode links) | 9.17:1 |
-| Ink 950 on Annotation Amber (hero button) | 10.43:1 |
 | Annotation Amber on Ink 900 (code) | 9.95:1 |
 | comment `#7482A0` on Ink 900 (code) | 4.76:1 |
 
@@ -202,17 +201,15 @@ Annotation Amber is for dark surfaces. On light surfaces, use Amber 700
 
 | Role | Typeface | Fallback stack |
 | --- | --- | --- |
-| Headings and the hero | [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) 600 to 800 | IBM Plex Sans, `system-ui`, sans-serif |
+| Headings | IBM Plex Sans 500 to 600 | `system-ui`, -apple-system, Segoe UI, sans-serif |
 | UI and prose | [IBM Plex Sans](https://fonts.google.com/specimen/IBM+Plex+Sans) 400, 500, 600, italic 400 | `system-ui`, -apple-system, Segoe UI, sans-serif |
 | Code | [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) 400, 500, 600 | `ui-monospace`, SF Mono, Menlo, Consolas, monospace |
 
-All three are open source (SIL OFL) and served from Google Fonts on the docs
-site. Bricolage Grotesque gives headings a little of the mark's cut-stroke
-character; it is set at 700 to 800 with tight tracking (`-0.025em` to
-`-0.05em` as size grows). Body text is IBM Plex Sans 400 at 16 px with a 1.7
-line height and a measure of about 46 rem. Code is JetBrains Mono at 13 px
-without ligatures, so `->` and `::` read exactly as typed. The wordmark is
-custom drawn and is not set in any of these.
+Both typefaces are open source (SIL OFL) and served from Google Fonts.
+Headings share the prose typeface, using weight and spacing to establish a
+hierarchy. Body text is IBM Plex Sans 400 at 16 px with a 1.7 line height and
+a measure of about 46 rem. Code is JetBrains Mono at 13 px without ligatures,
+so `->` and `::` read exactly as typed. The wordmark is custom drawn.
 
 ## Code theme: tynix ink
 
@@ -255,9 +252,15 @@ language server instead.
 
 ## Imagery and layout
 
-- Hexagons, the colon and thin connector lines are the recurring motifs. Use
-  them sparingly as structure (backgrounds, diagrams), never as decoration on
-  top of content.
+- Use typography, spacing and thin rules to organize documentation. Keep
+  backgrounds flat, with small corner radii for code and controls.
+- The home page leads with installation and a working code example. Group
+  reference links as lists, with clear labels and descriptions.
+- Show the current page in the sidebar. Long articles provide section links
+  in a side index on wide screens and a disclosure within the article on
+  smaller screens.
+- Reserve the mark for identity and the syntax palette for code. Avoid
+  decorative gradients, oversized logos and repeated promotional panels.
 - Diagrams use the theme's surface colors with Nix blue for "process",
   Amber for "type-level" and Haskell purple for "output".
 - Prefer real code and real diagnostics over illustrations.
