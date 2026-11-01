@@ -22,7 +22,7 @@
     "@shikijs/core": "4.5.0",
     "@shikijs/engine-javascript": "4.5.0",
     "prettier": "^3.9.10",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
     "vite-plus": "^1.4.0"
   }
 }
