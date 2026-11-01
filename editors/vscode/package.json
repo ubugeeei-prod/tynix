@@ -352,7 +352,7 @@
     "test:update-snapshots": "tsc -p tsconfig.json && UPDATE_SNAPSHOTS=1 node --test dist/grammar.spec.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.2"
+    "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
