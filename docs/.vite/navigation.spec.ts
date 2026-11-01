@@ -39,3 +39,11 @@ test("can process an already enhanced page without duplicating navigation", () =
   const once = processNavigation(article(sections));
   assert.equal(processNavigation(once), once);
 });
+
+test("keeps chapter overview links pointing to their parent after SSG relocation", () => {
+  const input = '<div class="tx-pager"><a href="./index.html">Overview</a><a href="../next/index.html">Next</a></div>';
+  const output = processNavigation(input);
+  assert.ok(output.includes('href="../index.html">Overview'));
+  assert.ok(output.includes('href="../next/index.html">Next'));
+  assert.equal(processNavigation(output), output);
+});

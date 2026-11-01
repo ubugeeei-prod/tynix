@@ -122,6 +122,7 @@ document.addEventListener("click", async (event) => {
 `;
 
 const darkVars = String.raw`
+  --octc-surface-noise-image: none;
   --tx-card: ${palette.ink850};
   --tx-hairline: color-mix(in srgb, ${palette.ink700} 80%, transparent);
   --tx-amber-text: ${palette.amber};

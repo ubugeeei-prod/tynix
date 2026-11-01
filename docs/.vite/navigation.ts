@@ -15,6 +15,12 @@ export function processNavigation(html: string): string {
     );
   }
 
+  // A source link to ./index.md means the parent overview. SSG moves each
+  // chapter into its own directory but leaves this particular link at ./index.html.
+  html = html.replace(/<div class="tx-pager">([\s\S]*?)<\/div>/gu, (pager) =>
+    pager.replaceAll('href="./index.html"', 'href="../index.html"'),
+  );
+
   // Entry pages already supply their own overview. Preserve a native TOC if
   // a future renderer supplies one; the fallback reads only article headings.
   if (/<aside[^>]+class="[^"]*\btoc\b/u.test(html) || /<body[^>]+class="[^"]*\bentry-page\b/u.test(html)) return html;
