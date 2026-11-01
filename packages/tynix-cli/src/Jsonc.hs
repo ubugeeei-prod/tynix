@@ -279,7 +279,7 @@ detectIndent content =
          not (Text.null ws),
          not (Text.null (Text.strip line))
        ] of
-    first : _ -> first
+    indentation : _ -> indentation
     [] -> "  "
   where
     isIndent c = c == ' ' || c == '\t'

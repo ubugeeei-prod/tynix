@@ -390,10 +390,10 @@ hoveredPathAt lineNo charNo content =
 -- JSON @null@ when no function call is in scope.
 signatureHelpResult :: Either String Analysis -> Text -> Int -> Int -> Value
 signatureHelpResult result content lineNo charNo =
-  maybe Null encode (either (const Nothing) signature result)
+  maybe Null renderResult (either (const Nothing) signature result)
   where
     signature analysis = signatureAt analysis lineNo charNo content
-    encode (name, scheme, activeParam) =
+    renderResult (name, scheme, activeParam) =
       object
         [ "signatures" .= [signatureValue name scheme],
           "activeSignature" .= (0 :: Int),
