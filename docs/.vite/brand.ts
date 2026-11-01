@@ -389,9 +389,10 @@ body {
 .tx-toc li { margin: 0.6rem 0; }
 .tx-toc a { color: var(--octc-color-text-muted); font-size: 0.8125rem; line-height: 1.45; display: block; }
 .tx-toc a:hover, .tx-toc a:focus-visible { color: var(--octc-color-primary); }
-.tx-page-index { margin: 1.75rem 0; padding: 0.8rem 0; border-top: 1px solid var(--tx-hairline); border-bottom: 1px solid var(--tx-hairline); }
-.tx-page-index summary { cursor: pointer; color: var(--octc-color-text-muted); font-size: 0.875rem; font-weight: 500; }
-.tx-page-index[open] summary { margin-bottom: 0.65rem; }
+.tx-page-index { margin: 1.75rem 0; padding: 0; border-top: 1px solid var(--tx-hairline); border-bottom: 1px solid var(--tx-hairline); }
+.tx-page-index summary { min-height: 2.75rem; padding: 0.7rem 0; cursor: pointer; color: var(--octc-color-text-muted); font-size: 0.875rem; font-weight: 500; }
+.tx-page-index[open] { padding-bottom: 0.65rem; }
+.tx-page-index[open] summary { margin-bottom: 0.35rem; }
 .tx-page-index li { margin: 0.4rem 0; font-size: 0.875rem; }
 @media (min-width: 1280px) {
   .tx-toc { display: block; }
