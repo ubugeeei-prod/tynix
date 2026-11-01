@@ -303,7 +303,13 @@ builtinTypeNames =
     ("Tensor", "Tensor [d1 d2 …] a — n-dimensional nested lists"),
     ("Range", "Range lo hi T — bounded numbers"),
     ("Unit", "Unit u T — numbers tagged with a unit"),
-    ("Tuple", "Tuple [a b …] — fixed-shape heterogeneous lists")
+    ("Tuple", "Tuple [a b …] — fixed-shape heterogeneous lists"),
+    ("Get", "Get r k — the type of field k of record r"),
+    ("KeyOf", "KeyOf r — the union of a record's field names"),
+    ("Length", "Length xs — the length of an exact sequence"),
+    ("Add", "Add a b — integer literal addition"),
+    ("Sub", "Sub a b — integer literal subtraction"),
+    ("Mul", "Mul a b — integer literal multiplication")
   ]
 
 typeKeywords :: [(Text, Text)]
@@ -589,6 +595,12 @@ snippetItems ctx wordStart =
        | atTopLevel
        ]
     <> [ snippet "type alias" "type" "type ${1:Name} = ${0:Type};" "Declare a type alias"
+       | atTopLevel
+       ]
+    <> [ snippet "opaque type" "opaque" "opaque type ${1:Name} = ${0:String};" "Declare a nominal type"
+       | atTopLevel
+       ]
+    <> [ snippet "macro" "macro" "macro ${1:name} {\n  (\\$${2:x}:expr) => (${0:\\$${2:x}});\n};\n" "Declare a hygienic macro"
        | atTopLevel
        ]
     <> [ snippet "signature + binding" "sig" "${1:name} :: ${2:Type};\n${1:name} = ${0:value};" "Typed let binding"

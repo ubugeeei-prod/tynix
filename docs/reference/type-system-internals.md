@@ -19,7 +19,9 @@ numbers and shapes, a **consistency** relation for the gradual `dynamic`
 boundary, *soft* inference variables that keep injected dependencies gradual,
 **kind inference** for higher-kinded aliases, and **structural reduction** for
 aliases and conditional types. Types never reach runtime: compilation is pure
-erasure.
+erasure. Effect rows, linearity, capture sets, dependent arrows, opaque types,
+higher-rank polymorphism, and macros are specified separately in
+[Effects, Linearity & Macros](./advanced-types.md).
 
 ## The pipeline
 

@@ -16,7 +16,7 @@ module Kind
 where
 
 import Alias (mkAliasEnv)
-import Control.Monad (foldM, replicateM, void)
+import Control.Monad (foldM, void)
 import Control.Monad.State.Strict (StateT, evalStateT, get, lift, modify', put)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -102,7 +102,9 @@ inferAll aliases = do
     Map.fromList
       <$> traverse
         ( \alias -> do
-            params <- replicateM (length (typeAliasParams alias)) freshKindMeta
+            -- An explicit `(f :: Type -> Type)` fixes the parameter's kind;
+            -- the rest are inferred from the body.
+            params <- traverse (maybe freshKindMeta pure) (paddedKinds alias)
             result <- freshKindMeta
             pure (typeAliasName alias, AliasPlaceholder params result)
         )
@@ -160,6 +162,11 @@ inferKind env local = \case
     _ <- unifyKind yesKind noKind
     zonkKind yesKind
   TInfer name -> maybe (flexibleKind name) pure (Map.lookup name local)
+  TSingleton _ base -> inferTypeLeaf env local base >> pure KType
+
+-- | One kind annotation slot per parameter.
+paddedKinds :: TypeAlias -> [Maybe Kind]
+paddedKinds alias = take (length (typeAliasParams alias)) (typeAliasParamKinds alias <> repeat Nothing)
 
 inferTypeLeaf :: AliasKindEnv -> Map Name Kind -> Type -> KindM ()
 inferTypeLeaf env local ty = do
@@ -264,7 +271,15 @@ builtinKinds =
       ("Tensor", KFun KType (KFun KType KType)),
       ("Tuple", KFun KType KType),
       ("Unit", KFun KType (KFun KType KType)),
-      ("Vec", KFun KType (KFun KType KType))
+      ("Vec", KFun KType (KFun KType KType)),
+      -- Type-level operators used by dependent signatures.
+      ("Get", KFun KType (KFun KType KType)),
+      ("KeyOf", KFun KType KType),
+      ("Add", KFun KType (KFun KType KType)),
+      ("Sub", KFun KType (KFun KType KType)),
+      ("Mul", KFun KType (KFun KType KType)),
+      ("Length", KFun KType KType),
+      ("Effect", KType)
     ]
 
 nextKindSeed :: AliasKindEnv -> Int

@@ -60,6 +60,18 @@ data DiagnosticCode
   | TC0020NotConcatenable
   | TC0021NotUpdatable
   | TC0022DynamicLetBinding
+  | TC0023EffectNotAllowed
+  | TC0024ImpureInPureEval
+  | TC0025CaptureNotAllowed
+  | TC0026LinearityViolation
+  | TC0027OpaqueType
+  | -- Macro expansion (TX)
+    TX0001NoMatchingRule
+  | TX0002InvalidMacroPattern
+  | TX0003HygieneViolation
+  | TX0004InvalidTemplate
+  | TX0005ExpansionLimit
+  | TX0006StrayMacroVariable
   | -- Driver / project (TD)
     TD0001ReadFailed
   | TD0002DuplicateAmbientDeclaration
@@ -113,6 +125,17 @@ diagnosticCodeText code = case code of
   TC0020NotConcatenable -> "TC0020"
   TC0021NotUpdatable -> "TC0021"
   TC0022DynamicLetBinding -> "TC0022"
+  TC0023EffectNotAllowed -> "TC0023"
+  TC0024ImpureInPureEval -> "TC0024"
+  TC0025CaptureNotAllowed -> "TC0025"
+  TC0026LinearityViolation -> "TC0026"
+  TC0027OpaqueType -> "TC0027"
+  TX0001NoMatchingRule -> "TX0001"
+  TX0002InvalidMacroPattern -> "TX0002"
+  TX0003HygieneViolation -> "TX0003"
+  TX0004InvalidTemplate -> "TX0004"
+  TX0005ExpansionLimit -> "TX0005"
+  TX0006StrayMacroVariable -> "TX0006"
   TD0001ReadFailed -> "TD0001"
   TD0002DuplicateAmbientDeclaration -> "TD0002"
   TD0003DuplicateAmbientEntry -> "TD0003"

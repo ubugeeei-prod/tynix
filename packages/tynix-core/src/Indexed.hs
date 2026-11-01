@@ -157,7 +157,7 @@ mentionsIndexedConstructor = \case
 normalizeIndexed :: Type -> Type
 normalizeIndexed = \case
   TTypeList items -> TTypeList (normalizeIndexedType <$> items)
-  TFun mult left right -> TFun mult (normalizeIndexedType left) (normalizeIndexedType right)
+  TArrow arrow left right -> TArrow arrow (normalizeIndexedType left) (normalizeIndexedType right)
   TRecord fields -> TRecord (fmap normalizeIndexedType fields)
   TOpenRecord fields tail' -> mkOpenRecord (fmap normalizeIndexedType fields) (normalizeIndexedType tail')
   TOptional inner -> TOptional (normalizeIndexedType inner)

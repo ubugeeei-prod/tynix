@@ -9,8 +9,10 @@ module Alias
     expandAliases,
     expandAliasHead,
     flattenUnion,
+    isOpaqueHead,
     matchPattern,
     mkAliasEnv,
+    revealOpaque,
   )
 where
 
@@ -93,6 +95,7 @@ expandAliases env = goPath Set.empty 0
           case ty of
             TCon name
               | Just alias <- Map.lookup name env,
+                not (typeAliasOpaque alias),
                 null (typeAliasParams alias),
                 not (Set.member name seen) ->
                   goPath (Set.insert name seen) (depth + 1) (typeAliasBody alias)
@@ -109,7 +112,7 @@ expandAliases env = goPath Set.empty 0
           reduce = reduceWith seen
        in case ty of
             TTypeList items -> TTypeList (map (go depth) items)
-            TFun mult a b -> TFun mult (go depth a) (go depth b)
+            TArrow arrow a b -> TArrow arrow{arrowEffects = go depth (arrowEffects arrow)} (go depth a) (go depth b)
             TRecord fields -> TRecord (fmap (go depth) fields)
             TOpenRecord fields tail' -> mkOpenRecord (fmap (go depth) fields) (go depth tail')
             TOptional inner -> TOptional (go depth inner)
@@ -124,6 +127,7 @@ expandAliases env = goPath Set.empty 0
       case collectApps (TApp f x) of
         (TCon name, args)
           | Just alias <- Map.lookup name env,
+            not (typeAliasOpaque alias),
             length args >= length (typeAliasParams alias),
             not (Set.member name seen) ->
               let (used, rest) = splitAt (length (typeAliasParams alias)) args
@@ -146,16 +150,38 @@ expandAliasHead env = go 0
           case ty of
             TCon name
               | Just alias <- Map.lookup name env,
+                not (typeAliasOpaque alias),
                 null (typeAliasParams alias) ->
                   go (depth + 1) (typeAliasBody alias)
             TApp _ _
               | (TCon name, args) <- collectApps ty,
                 Just alias <- Map.lookup name env,
+                not (typeAliasOpaque alias),
                 length args >= length (typeAliasParams alias) ->
                   let (used, rest) = splitAt (length (typeAliasParams alias)) args
                       subst = Map.fromList (zip (typeAliasParams alias) used)
                    in go (depth + 1) (foldl TApp (substituteTypeVars subst (typeAliasBody alias)) rest)
             _ -> ty
+
+-- | Whether a type is headed by an `opaque type` (fully applied or not).
+isOpaqueHead :: AliasEnv -> Type -> Bool
+isOpaqueHead env ty =
+  case collectApps ty of
+    (TCon name, _) -> maybe False typeAliasOpaque (Map.lookup name env)
+    _ -> False
+
+-- | Unfold one opaque type at the head into its representation. This is the
+-- only place an opaque type is looked through: explicit `as` casts use it to
+-- move between a nominal type and the type it is built from.
+revealOpaque :: AliasEnv -> Type -> Maybe Type
+revealOpaque env ty =
+  case collectApps ty of
+    (TCon name, args)
+      | Just alias <- Map.lookup name env,
+        typeAliasOpaque alias,
+        length args == length (typeAliasParams alias) ->
+          Just (substituteTypeVars (Map.fromList (zip (typeAliasParams alias) args)) (typeAliasBody alias))
+    _ -> Nothing
 
 -- | Match a concrete type against a pattern containing 'TInfer' placeholders.
 --

@@ -1,0 +1,19 @@
+# Hygienic, declarative, typed macros. Expansions are plain Nix.
+macro enum {
+  ( $( $tag:ident ),* ) => ({ $( $tag = stringify!($tag); )* });
+};
+
+macro unless {
+  ($cond :: Bool, $body:expr) => (if $cond then null else $body);
+};
+
+macro withTmp {
+  ($value:expr, $use:expr) => (let tmp = $value; in $use tmp);
+};
+
+let tmp = "outer"; in {
+  colors = enum!(red, green, blue);
+  warning = unless!(false, "shown");
+  # The template's `tmp` is renamed, so the argument still sees "outer".
+  wrapped = withTmp!(1, (x: [ x tmp ]));
+}

@@ -27,5 +27,5 @@ languages = ["tynix", "Nix"]
 # and set `rev` to a local commit sha that contains the grammar.
 [grammars.tynix]
 repository = "https://github.com/ubugeeei-prod/tynix"
-rev = "eb01550f08d1caf109c6eaa89190991e925bc579"
+rev = "b1fa3903b6f85b7c3ea330171aff86804a8c25a1"
 path = "editors/tree-sitter-tynix"

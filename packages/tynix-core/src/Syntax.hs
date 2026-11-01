@@ -14,6 +14,11 @@ module Syntax
     Expr (..),
     InterpForm (..),
     LetItem (..),
+    MacroDef (..),
+    MacroFragment (..),
+    MacroRule (..),
+    MacroToken (..),
+    RepeatKind (..),
     Marked (..),
     Pattern (..),
     PatternBinder (..),
@@ -50,7 +55,7 @@ data Marked a = Marked
   { markedDirective :: Maybe DiagnosticDirective,
     markedValue :: a
   }
-  deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor, Foldable, Traversable)
 
 -- | A complete tynix file.
 --
@@ -60,8 +65,56 @@ data Marked a = Marked
 data Program = Program
   { programAliases :: [TypeAlias],
     programAmbient :: [AmbientDecl],
-    programExpr :: Maybe (Marked Expr)
+    programExpr :: Maybe (Marked Expr),
+    -- | Macros declared in the file. Invocations are expanded while parsing,
+    -- so the expression above never contains one; the definitions are kept
+    -- so their templates can be type-checked once, at the definition.
+    programMacros :: [MacroDef]
   }
+  deriving (Eq, Show)
+
+-- | A declarative macro: `macro name { (pattern) => (template); ... };`.
+data MacroDef = MacroDef
+  { macroName :: Name,
+    macroRules :: [MacroRule],
+    macroSpan :: SrcSpan
+  }
+  deriving (Eq, Show)
+
+-- | One rule. The template is kept as source text (it may contain `$(...)*`
+-- repetitions, which are expanded textually per invocation) together with
+-- its offset in the file; 'ruleCheck' is the template instantiated once and
+-- closed over its metavariables as a lambda, ready to type-check.
+data MacroRule = MacroRule
+  { rulePattern :: [MacroToken],
+    ruleTemplate :: Text,
+    ruleTemplateOffset :: Int,
+    ruleCheck :: Expr
+  }
+  deriving (Eq, Show)
+
+-- | A pattern element.
+data MacroToken
+  = -- | A literal token that must appear verbatim: a word or punctuation.
+    MLiteral Text
+  | -- | A metavariable `$name:fragment` (or `$name :: Type`).
+    MVar Name MacroFragment
+  | -- | A delimited group, `( ... )`, `[ ... ]`, or `{ ... }`.
+    MGroup Text [MacroToken] Text
+  | -- | A repetition `$( ... ) sep? *|+|?`.
+    MRepeat [MacroToken] (Maybe Text) RepeatKind
+  deriving (Eq, Show)
+
+-- | What a metavariable matches.
+data MacroFragment
+  = -- | An expression; with a type, the argument must have that type.
+    FragExpr (Maybe Type)
+  | FragIdent
+  | FragType
+  | FragString
+  deriving (Eq, Show)
+
+data RepeatKind = ZeroOrMore | OneOrMore | ZeroOrOne
   deriving (Eq, Show)
 
 -- | Ambient declaration describing an existing `.nix` file.
@@ -114,6 +167,9 @@ data Expr
   | EIf Expr Expr Expr
   | EList [Expr]
   | ECast Expr Type
+  | -- | A type ascription `(expr :: Type)`: unlike a cast, the expression
+    -- must already have the type. Erased on compilation.
+    EAscribe Expr Type
   | EInterp InterpForm [StringPart]
   | -- | `base.path or fallback`: selection with a default when any step of the
     -- path is missing.
@@ -294,6 +350,7 @@ stripLocations = go
       EIf c a b -> EIf (go c) (go a) (go b)
       EList xs -> EList (map go xs)
       ECast e ty -> ECast (go e) ty
+      EAscribe e ty -> EAscribe (go e) ty
       EInterp form parts -> EInterp form (map goPart parts)
       EPathInterp parts -> EPathInterp (map goPart parts)
       other -> other
@@ -339,6 +396,7 @@ exprAnnotations = go
       EIf c a b -> go c <> go a <> go b
       EList xs -> foldMap go xs
       ECast e ty -> go e <> [ty]
+      EAscribe e ty -> go e <> [ty]
       EInterp _ parts -> foldMap goPart parts
       EPathInterp parts -> foldMap goPart parts
       EVar _ -> []

@@ -152,21 +152,33 @@ const grammar = {
         { include: "#comments" },
         { include: "#type-alias" },
         { include: "#declare" },
+        { include: "#macro" },
       ],
     },
     "type-alias": {
-      comment: "type Name params = Type;",
+      comment:
+        "type Name params = Type;  opaque type Id t = String;  type F (f :: Type -> Type) = ...;",
       name: scope("meta.type-alias"),
-      begin: String.raw`${L}(type)\s+(${IDENT})((?:\s+${IDENT})*)\s*(=)(?![=>])`,
+      begin: String.raw`${L}(?:(opaque)\s+)?(type)\s+(${IDENT})((?:\s+(?:${IDENT}|\([^)]*\)))*)\s*(=)(?![=>])`,
       beginCaptures: {
-        1: { name: scope("storage.type.type") },
-        2: { name: scope("entity.name.type.alias") },
-        3: {
+        1: { name: scope("storage.modifier.opaque") },
+        2: { name: scope("storage.type.type") },
+        3: { name: scope("entity.name.type.alias") },
+        4: {
           patterns: [
+            {
+              match: String.raw`::`,
+              name: scope("keyword.operator.type.annotation"),
+            },
+            {
+              match: String.raw`->`,
+              name: scope("storage.type.function.arrow"),
+            },
+            { match: kw(["Type"]), name: scope("support.type.kind") },
             { match: IDENT, name: scope("entity.name.type.parameter") },
           ],
         },
-        4: { name: scope("keyword.operator.assignment") },
+        5: { name: scope("keyword.operator.assignment") },
       },
       end: ";",
       endCaptures: { 0: { name: scope("punctuation.terminator.statement") } },
@@ -197,6 +209,56 @@ const grammar = {
         },
       ],
     },
+    macro: {
+      comment: "macro name { ($x:expr) => (template); };",
+      name: scope("meta.macro"),
+      begin: String.raw`${L}(macro)\s+(${IDENT})\s*(\{)`,
+      beginCaptures: {
+        1: { name: scope("storage.type.macro") },
+        2: { name: scope("entity.name.function.macro") },
+        3: { name: scope("punctuation.section.braces.begin") },
+      },
+      end: String.raw`\}`,
+      endCaptures: { 0: { name: scope("punctuation.section.braces.end") } },
+      patterns: [
+        { include: "#comments" },
+        { match: "=>", name: scope("keyword.operator.macro.rule") },
+        { include: "#metavariable" },
+        { include: "#expression" },
+      ],
+    },
+    "macro-call": {
+      comment: "name!( ... )",
+      match: String.raw`${L}(${IDENT})(!)(?=\()`,
+      captures: {
+        1: { name: scope("entity.name.function.macro") },
+        2: { name: scope("punctuation.definition.macro") },
+      },
+    },
+    metavariable: {
+      patterns: [
+        {
+          comment: "$( ... ),*",
+          begin: String.raw`\$\(`,
+          beginCaptures: {
+            0: { name: scope("keyword.operator.macro.repetition") },
+          },
+          end: String.raw`\)[,;]?[*+?]`,
+          endCaptures: {
+            0: { name: scope("keyword.operator.macro.repetition") },
+          },
+          patterns: [{ include: "#metavariable" }, { include: "#expression" }],
+        },
+        {
+          match: String.raw`(\$${IDENT})(?:(:)(expr|ident|type|string)${R})?`,
+          captures: {
+            1: { name: scope("variable.other.metavariable") },
+            2: { name: scope("punctuation.separator.fragment") },
+            3: { name: scope("support.type.fragment") },
+          },
+        },
+      ],
+    },
     signature: {
       comment: "name :: Type;  (let items, attribute sets, declare bodies)",
       name: scope("meta.signature"),
@@ -206,7 +268,8 @@ const grammar = {
         2: { name: scope("string.quoted.double") },
         3: { name: scope("keyword.operator.type.annotation") },
       },
-      end: ";",
+      // An unmatched `)` ends it too: `(expr :: Type)` is an ascription.
+      end: String.raw`;|(?=\))`,
       endCaptures: { 0: { name: scope("punctuation.terminator.signature") } },
       patterns: [{ include: "#type" }],
     },
@@ -232,6 +295,8 @@ const grammar = {
         { include: "#number" },
         { include: "#constants" },
         { include: "#builtins" },
+        { include: "#macro-call" },
+        { include: "#metavariable" },
         { include: "#lambda-head" },
         { include: "#braces" },
         { include: "#brackets" },
@@ -628,7 +693,46 @@ const grammar = {
         { include: "#number" },
         { include: "#string-double" },
         { match: "%1", name: scope("storage.modifier.linear") },
+        {
+          comment: "capture set glued to an arrow: `->{fetch, log}`",
+          match: String.raw`(->)(\{)([^}]*)(\})`,
+          captures: {
+            1: { name: scope("storage.type.function.arrow") },
+            2: { name: scope("punctuation.section.braces.begin") },
+            3: {
+              patterns: [
+                { match: IDENT, name: scope("variable.other.capture") },
+                { match: ",", name: scope("punctuation.separator.comma") },
+              ],
+            },
+            4: { name: scope("punctuation.section.braces.end") },
+          },
+        },
         { match: "->", name: scope("storage.type.function.arrow") },
+        {
+          comment: "effect row: `! { Trace, Throw | e }` or `! e`",
+          match: String.raw`(!)\s*(?:(\{)([^}]*)(\})|(${IDENT}))`,
+          captures: {
+            1: { name: scope("keyword.operator.effect") },
+            2: { name: scope("punctuation.section.braces.begin") },
+            3: {
+              patterns: [
+                {
+                  match: String.raw`[A-Z][A-Za-z0-9_'\-]*`,
+                  name: scope("support.type.effect"),
+                },
+                { match: IDENT, name: scope("entity.name.type.parameter") },
+                {
+                  match: String.raw`[,|]`,
+                  name: scope("punctuation.separator.effect"),
+                },
+              ],
+            },
+            4: { name: scope("punctuation.section.braces.end") },
+            5: { name: scope("entity.name.type.parameter") },
+          },
+        },
+        { match: "::", name: scope("keyword.operator.type.annotation") },
         { match: "=>", name: scope("keyword.operator.type.constraint") },
         { match: String.raw`\|`, name: scope("keyword.operator.type.union") },
         {

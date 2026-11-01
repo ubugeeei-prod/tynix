@@ -49,7 +49,9 @@ data CheckContext = CheckContext
     checkFile :: FilePath,
     -- | True inside the body of a `with` whose scope type is not a known
     -- record, so unresolved names degrade to `dynamic` instead of erroring.
-    checkOpenScope :: Bool
+    checkOpenScope :: Bool,
+    -- | Pure evaluation (flakes): performing the `Impure` effect is an error.
+    checkPureEval :: Bool
   }
 
 -- | User-visible results produced by checking a program.
@@ -77,7 +79,56 @@ data CheckError = CheckError
 -- `fetchFromGitHub`, or a field selected from an unknown record such as
 -- `lib.mkOption`). Calling one is gradual rather than pinning it to the
 -- monotype of the first call site.
-data InferState = InferState {nextMeta :: Int, substitutions :: Map Int Type, softMetas :: Set.Set Int}
+--
+-- Besides solving types, inference tracks two facts about the computation it
+-- is walking:
+--
+-- * 'currentEffects' is the effect row of the innermost enclosing lambda body
+--   (or 'TDynamic' at the top level). Applying a function adds the callee's
+--   latent effects to it, so a lambda's own latent effects are inferred from
+--   its body.
+-- * 'usages' counts how often each lambda binder is consumed, which decides
+--   whether the lambda is linear (`%1 ->`) and lets a linear signature be
+--   enforced. A use under a nested lambda, or as the argument of an
+--   unrestricted function ('usageScale'), counts as many.
+data InferState = InferState
+  { nextMeta :: Int,
+    substitutions :: Map Int Type,
+    softMetas :: Set.Set Int,
+    currentEffects :: Type,
+    usages :: Map Name (Int, Usage),
+    lambdaDepth :: Int,
+    usageScale :: Usage
+  }
+
+-- | How many times a binder is consumed: never, exactly once, more than once,
+-- or a different number of times on different branches.
+data Usage = UZero | UOne | UMany | UMixed
+  deriving (Eq, Show)
+
+addUsage :: Usage -> Usage -> Usage
+addUsage UZero u = u
+addUsage u UZero = u
+addUsage UMixed _ = UMixed
+addUsage _ UMixed = UMixed
+addUsage _ _ = UMany
+
+joinUsage :: Usage -> Usage -> Usage
+joinUsage a b
+  | a == b = a
+  | otherwise = UMixed
+
+initialInferState :: InferState
+initialInferState =
+  InferState
+    { nextMeta = 0,
+      substitutions = Map.empty,
+      softMetas = Set.empty,
+      currentEffects = TDynamic,
+      usages = Map.empty,
+      lambdaDepth = 0,
+      usageScale = UOne
+    }
 
 type InferM = StateT InferState (Either CheckError)
 
@@ -139,7 +190,7 @@ checkProgram ctx = either (Left . checkErrorMessage) Right . checkProgramDetaile
 -- | Like 'checkProgram', but keeps the source span of the failure.
 checkProgramDetailed :: CheckContext -> Program -> Either CheckError CheckResult
 checkProgramDetailed ctx program =
-  evalStateT (inferTop ctx (globalEnvironment ctx)) (InferState 0 Map.empty Set.empty)
+  evalStateT (inferTop ctx (globalEnvironment ctx)) initialInferState
   where
     inferTop local env = case programExpr program of
       Nothing -> pure (CheckResult Nothing Map.empty)
@@ -165,8 +216,8 @@ globalEnvironment ctx =
         Just fieldTy -> schemeFromAnnotation fieldTy
         Nothing -> fallbackGlobal name
     fallbackGlobal = \case
-      "throw" -> Scheme ["a"] (TFun Many tString (TVar "a"))
-      "abort" -> Scheme ["a"] (TFun Many tString (TVar "a"))
+      "throw" -> Scheme ["a"] (TArrow (effectfulArrow ["Throw"]) tString (TVar "a"))
+      "abort" -> Scheme ["a"] (TArrow (effectfulArrow ["Abort"]) tString (TVar "a"))
       "toString" -> Scheme [] (TFun Many tDynamic tString)
       "isNull" -> Scheme [] (TFun Many tDynamic tBool)
       "baseNameOf" -> Scheme [] (TFun Many tDynamic tString)
@@ -224,7 +275,16 @@ inferExpr ctx env = \case
   ELoc region inner -> withSpan region (inferExpr ctx env inner)
   EVar name ->
     case Map.lookup name env of
-      Just scheme -> instantiate scheme
+      Just scheme -> do
+        noteUse name
+        -- A binder checked against a dependent arrow holds a singleton; used
+        -- as an ordinary value it is just its base type.
+        instantiate scheme >>= zonkHead >>= \case
+          TSingleton _ base -> pure base
+          -- A higher-rank parameter (`f :: forall a. a -> a`) is
+          -- instantiated afresh at every use.
+          TForall vars body -> instantiate (Scheme vars body)
+          ty -> pure ty
       Nothing
         | checkOpenScope ctx -> pure tDynamic
         | otherwise -> throwCheck (withCode TC0001UnboundName ("unbound name: " <> quoteName name))
@@ -241,10 +301,7 @@ inferExpr ctx env = \case
   EPathInterp parts -> do
     mapM_ (\case StrExpr expr -> void (inferExpr ctx env expr); _ -> pure ()) parts
     pure tPath
-  ELambda pattern' body -> do
-    (argTy, patternEnv) <- inferPatternBindings ctx env pattern'
-    bodyTy <- inferExpr ctx (patternEnv <> env) body
-    pure (TFun (inferLambdaMultiplicity pattern' body) argTy bodyTy)
+  ELambda pattern' body -> inferLambda ctx env pattern' body Nothing
   EApp fun arg
     | EVar "import" <- unloc fun,
       Just target <- importTarget (unloc arg),
@@ -257,10 +314,14 @@ inferExpr ctx env = \case
     -- their identity (needed to widen `max 1 2` to `1 | 2`).
     funTy <- inferExpr ctx env fun >>= zonkHead
     let resolvedFunTy = resolveHead (checkAliases ctx) funTy
+        -- Only a linear function consumes its argument exactly once.
+        argScale = case resolvedFunTy of
+          TFun One _ _ -> UOne
+          _ -> UMany
     -- A known parameter type is pushed into a lambda argument before its
     -- body is inferred (bidirectional checking), so `f (ps: [ ps.x ])`
     -- sees what `ps` is.
-    argTy <- case resolvedFunTy of
+    argTy <- withScale argScale . handleEffects ctx (handledEffects fun) $ case resolvedFunTy of
       TFun _ domTy _ -> checkAgainst ctx env arg domTy
       _ -> inferExpr ctx env arg
     if resolvedFunTy == tDynamic
@@ -269,7 +330,22 @@ inferExpr ctx env = \case
         if resolvedFunTy == tAny
           then pure tAny
           else case resolvedFunTy of
-            TFun _ domTy outTy -> atSpanOf arg (constrain ctx argTy domTy) *> zonkHead outTy
+            TArrow arrow domTy outTy -> do
+              _ <- atSpanOf arg (constrain ctx argTy domTy)
+              perform ctx (arrowEffects arrow)
+              result <- case arrowBinder arrow of
+                Nothing -> pure outTy
+                Just binder -> do
+                  index <- dependentIndex env arg argTy domTy
+                  reduceOperators (checkAliases ctx) <$> zonk (substituteTypeVars (Map.singleton binder index) outTy)
+              result' <- zonkHead result
+              -- A type-level operator in the result (`Get r k`) can be
+              -- reduced once the arguments have pinned its inputs.
+              reduced <-
+                if isOperatorApp result'
+                  then reduceOperators (checkAliases ctx) <$> zonk result'
+                  else pure result'
+              instantiateRank reduced
             _
               | definitelyNotCallable resolvedFunTy ->
                   throwCheck (withCode TC0018NotCallable ("cannot call " <> describeNonCallable resolvedFunTy <> " as a function"))
@@ -305,6 +381,8 @@ inferExpr ctx env = \case
   EAssert cond body -> do
     condTy <- inferExpr ctx env cond
     _ <- constrain ctx condTy tBool
+    -- A failed assertion throws (and `tryEval` can catch it).
+    perform ctx (effectRow ["Throw"] Nothing)
     inferExpr ctx env body
   EWith scope body -> do
     scopeTy <- inferExpr ctx env scope >>= zonk
@@ -315,8 +393,8 @@ inferExpr ctx env = \case
       -- Any other scope (dynamic, unknown, ...) cannot be enumerated, so the
       -- body is checked with an open scope where unresolved names are dynamic.
       _ -> inferExpr ctx{checkOpenScope = True} env body
-  ELet items body -> do
-    (env', _) <- inferLet ctx env items
+  ELet items body -> hideNames (letBoundNames items) $ do
+    (env', _) <- inferLet ctx env items body
     inferExpr ctx env' body
   EAttrSet rawItems -> do
     (items, dynamicEntries) <- normalizeAttrItems rawItems
@@ -358,6 +436,13 @@ inferExpr ctx env = \case
             pure fallbackTy
         | otherwise -> lift (Left err)
   ESelect base fields -> do
+    -- Reading the clock, the host platform, or the search path is impure.
+    case (unloc base, fields) of
+      (EVar "builtins", SelectName name : _)
+        | name `elem` impureValues,
+          Map.lookup "builtins" env == Map.lookup "builtins" (globalEnvironment ctx) ->
+            perform ctx (effectRow ["Impure"] Nothing)
+      _ -> pure ()
     baseTy <- inferExpr ctx env base
     foldM step baseTy fields
     where
@@ -370,8 +455,15 @@ inferExpr ctx env = \case
   EIf cond yesExpr noExpr -> do
     condTy <- inferExpr ctx env cond
     _ <- constrain ctx condTy tBool
+    -- Only one branch runs, so each must consume a linear binder the same
+    -- number of times.
+    before <- gets usages
     yesTy <- inferExpr ctx env yesExpr >>= zonk
+    afterYes <- gets usages
+    modify' (\st -> st{usages = before})
     noTy <- inferExpr ctx env noExpr >>= zonk
+    afterNo <- gets usages
+    modify' (\st -> st{usages = Map.unionWith (\(depth, a) (_, b) -> (depth, joinUsage a b)) afterYes afterNo})
     joinBranches ctx yesTy noTy
   EList members ->
     traverse (inferExpr ctx env) members
@@ -379,6 +471,10 @@ inferExpr ctx env = \case
   ECast expr assertedTy -> do
     actualTy <- inferExpr ctx env expr
     checkCast ctx actualTy assertedTy
+  EAscribe expr ascribedTy -> do
+    actualTy <- checkAgainst ctx env expr ascribedTy
+    _ <- constrain ctx actualTy ascribedTy
+    pure ascribedTy
 
 -- | Whether every step of a selection path can be resolved without guessing:
 -- the base (and each intermediate value) has a known shape.
@@ -421,7 +517,7 @@ widenLiterals = \case
   TRecord fields -> TRecord (fmap widenLiterals fields)
   TOpenRecord fields tail' -> TOpenRecord (fmap widenLiterals fields) tail'
   TOptional inner -> TOptional (widenLiterals inner)
-  TFun mult a b -> TFun mult (widenLiterals a) (widenLiterals b)
+  TArrow arrow a b -> TArrow arrow (widenLiterals a) (widenLiterals b)
   TApp f x -> TApp f (widenLiterals x)
   TUnion members -> case nubOrdTypes (map widenLiterals members) of
     [single] -> single
@@ -445,24 +541,180 @@ checkAgainst ctx env expr expected =
   case expr of
     ELoc region inner -> withSpan region (checkAgainst ctx env inner expected)
     ELambda pattern' body -> do
-      target <- functionTarget . resolveHead (checkAliases ctx) <$> zonk expected
-      case target of
-        Just (domTy, codTy) -> do
-          (argTy, patternEnv) <- inferPatternBindings ctx env pattern'
-          -- The expected parameter flows *into* the pattern (contravariance).
-          _ <- catchInfer (constrain ctx domTy argTy)
-          bodyTy <- checkAgainst ctx (patternEnv <> env) body codTy
-          pure (TFun (inferLambdaMultiplicity pattern' body) argTy bodyTy)
+      expected' <- zonk expected
+      target <- skolemize expected'
+      case functionTarget (resolveHead (checkAliases ctx) target) of
+        Just arrowTarget -> do
+          checked <- inferLambda ctx env pattern' body (Just arrowTarget)
+          -- A lambda checked against fresh skolems works at every instance,
+          -- so it has the polymorphic type itself.
+          pure $ case expected' of
+            TForall _ _ -> expected'
+            _ -> checked
         Nothing -> inferExpr ctx env expr
     _ -> inferExpr ctx env expr
   where
     functionTarget = \case
-      TFun _ domTy codTy -> Just (domTy, codTy)
+      TArrow arrow domTy codTy -> Just (arrow, domTy, codTy)
       TUnion members ->
-        case [(d, c) | TFun _ d c <- map (resolveHead (checkAliases ctx)) members] of
+        case [(arrow, d, c) | TArrow arrow d c <- map (resolveHead (checkAliases ctx)) members] of
           [single] -> Just single
           _ -> Nothing
       _ -> Nothing
+
+-- | Replace the quantified variables of a polymorphic expectation by fresh
+-- rigid variables, so a lambda checked against `forall a. a -> a` must work
+-- for an arbitrary `a` (and cannot confuse it with an `a` in scope).
+skolemize :: Type -> InferM Type
+skolemize = \case
+  TForall vars body -> do
+    n <- gets nextMeta
+    modify' (\st -> st{nextMeta = nextMeta st + 1})
+    let rigid var = TVar (var <> "'" <> T.pack (show n))
+    skolemize (substituteTypeVars (Map.fromList [(var, rigid var) | var <- vars]) body)
+  other -> pure other
+
+-- | Whether a type is an application of a built-in type-level operator.
+isOperatorApp :: Type -> Bool
+isOperatorApp ty =
+  case collectApps ty of
+    (TCon name, _ : _) -> name `elem` ["Get", "KeyOf", "Add", "Sub", "Mul", "Length"]
+    _ -> False
+
+-- | Instantiate a result whose type is itself polymorphic (`Int -> forall a.
+-- a -> a`), as a higher-rank signature may produce.
+instantiateRank :: Type -> InferM Type
+instantiateRank = \case
+  TForall vars body -> instantiate (Scheme vars body)
+  other -> pure other
+
+-- | Infer a lambda, optionally against a known arrow (bidirectional
+-- checking). Besides the argument and result types this determines the
+-- arrow's
+--
+-- * multiplicity — linear when the binder is consumed exactly once;
+-- * latent effects — the effect row its body performs;
+-- * captures — the effectful capabilities the closure closes over;
+--
+-- and, when an expected arrow is given, enforces each of them: a `%1`
+-- arrow demands a linear body, `! { ... }` bounds the effects, `->{...}`
+-- bounds the captures, and a dependent arrow `(n :: Nat) -> B` gives the
+-- binder the singleton type `n`, so the body is checked against `B` itself.
+inferLambda :: CheckContext -> TypeEnv -> Pattern -> Expr -> Maybe (Arrow, Type, Type) -> InferM Type
+inferLambda ctx env pattern' body expected = do
+  (argTy, patternEnv0) <- case (pattern', expected) of
+    -- An unannotated binder simply takes the expected parameter type, which
+    -- keeps a higher-rank parameter (`forall a. a -> a`) polymorphic.
+    (PVar name Nothing, Just (_, domTy, _)) -> pure (domTy, Map.singleton name (Scheme [] domTy))
+    _ -> do
+      bound <- inferPatternBindings ctx env pattern'
+      forM_ expected $ \(_, domTy, _) ->
+        -- The expected parameter flows *into* the pattern (contravariance).
+        catchInfer (constrain ctx domTy (fst bound))
+      pure bound
+  let (patternEnv, bodyTarget, dependentOn) =
+        case (expected, pattern') of
+          (Just (arrow, domTy, codTy), PVar name _)
+            | Just binder <- arrowBinder arrow ->
+                let singleton = TSingleton name domTy
+                 in ( Map.insert name (Scheme [] singleton) patternEnv0,
+                      Just (substituteTypeVars (Map.singleton binder singleton) codTy),
+                      Just name
+                    )
+          (Just (arrow, domTy, codTy), _) -> (patternEnv0, Just (eraseBinder arrow domTy codTy), Nothing)
+          (Nothing, _) -> (patternEnv0, Nothing, Nothing)
+      bodyEnv = patternEnv <> env
+  outerEffects <- gets currentEffects
+  latent <- freshMeta
+  modify' (\st -> st{currentEffects = latent})
+  (bodyTy, usage) <-
+    trackPattern pattern' . inLambdaBody $
+      case bodyTarget of
+        Just codTy -> checkAgainst ctx bodyEnv body codTy
+        Nothing -> inferExpr ctx bodyEnv body
+  modify' (\st -> st{currentEffects = outerEffects})
+  captures <- lambdaCaptures ctx env pattern' body
+  forM_ expected $ \(arrow, _, _) -> do
+    when (arrowMult arrow == One && usage /= UOne) $
+      throwCheck (withCode TC0026LinearityViolation (linearityMessage pattern' usage))
+    constrainEffects latent (arrowEffects arrow)
+    forM_ (arrowCaptures arrow) $ \allowed ->
+      case filter (`notElem` allowed) captures of
+        [] -> pure ()
+        extra ->
+          throwCheck
+            ( withCode
+                TC0025CaptureNotAllowed
+                ("closure captures " <> quoteNames extra <> ", but its type only allows " <> captureSetText allowed)
+            )
+  let arrow =
+        Arrow
+          { arrowMult = if usage == UOne then One else Many,
+            arrowEffects = latent,
+            arrowCaptures = Just captures,
+            arrowBinder = dependentOn
+          }
+  pure (TArrow arrow argTy (maybe id abstractSingleton dependentOn bodyTy))
+  where
+    captureSetText allowed = "{" <> intercalate ", " (map T.unpack allowed) <> "}"
+
+-- | Turn the singleton of a dependent binder back into the binder's name, so
+-- an inferred dependent lambda reads `(n :: Nat) -> Vec n a`.
+abstractSingleton :: Name -> Type -> Type
+abstractSingleton name = go
+  where
+    go = \case
+      TSingleton other _ | other == name -> TVar name
+      TArrow arrow a b -> TArrow arrow (go a) (go b)
+      TTypeList items -> TTypeList (map go items)
+      TRecord fields -> TRecord (fmap go fields)
+      TOpenRecord fields tail' -> TOpenRecord (fmap go fields) (go tail')
+      TOptional inner -> TOptional (go inner)
+      TUnion members -> TUnion (map go members)
+      TApp f x -> TApp (go f) (go x)
+      other -> other
+
+linearityMessage :: Pattern -> Usage -> String
+linearityMessage pattern' usage =
+  "linear binder " <> binder <> " " <> problem
+  where
+    binder = case pattern' of
+      PVar name _ -> quoteName name
+      _ -> "of an attribute-set pattern"
+    problem = case usage of
+      UZero -> "is never used, but a `%1 ->` function must consume its argument exactly once"
+      UMany -> "is used more than once (directly, inside a closure, or as the argument of an unrestricted function)"
+      UMixed -> "is not used exactly once on every branch"
+      UOne -> "is used exactly once"
+
+-- | The effectful capabilities a lambda closes over: free variables bound
+-- in the enclosing (non-global) scope whose type is a function with a known,
+-- non-empty effect row.
+lambdaCaptures :: CheckContext -> TypeEnv -> Pattern -> Expr -> InferM [Name]
+lambdaCaptures ctx env pattern' body = do
+  let globals = globalEnvironment ctx
+      candidates =
+        [ (name, scheme)
+        | name <- Set.toList (freeVariables (ELambda pattern' body)),
+          Just scheme <- [Map.lookup name env],
+          Map.lookup name globals /= Just scheme
+        ]
+  fmap concat . forM candidates $ \(name, Scheme _ ty) -> do
+    ty' <- zonk ty
+    pure [name | isCapability ty']
+  where
+    isCapability ty =
+      case resolveHead (checkAliases ctx) ty of
+        TArrow arrow _ _ -> effectful (arrowEffects arrow)
+        _ -> False
+    effectful = \case
+      TRecord fields -> not (Map.null fields)
+      TOpenRecord fields tail' -> not (Map.null fields) || isRowVar tail'
+      TVar _ -> True
+      _ -> False
+    isRowVar = \case
+      TVar _ -> True
+      _ -> False
 
 -- | Apply a callee whose type is not known yet. Its parameter type is
 -- inferred from this argument, widened so one call site's literal does not
@@ -470,8 +722,11 @@ checkAgainst ctx env expr expected =
 applyUnknown :: CheckContext -> Type -> Type -> InferM Type
 applyUnknown ctx funTy argTy = do
   outTy <- freshMeta
+  effects <- freshMeta
   argTy' <- widenLiterals <$> zonk argTy
-  _ <- unify ctx funTy (TFun Many argTy' outTy)
+  _ <- unify ctx funTy (TArrow (plainArrow Many){arrowEffects = effects} argTy' outTy)
+  -- Whatever the callee turns out to perform happens here.
+  perform ctx effects
   zonk outTy
 
 -- | Recognize `import <path>` targets that can be resolved statically.
@@ -577,8 +832,8 @@ finishAttrSet ctx env dynamicEntries fields
 -- in value
 --   => allocates a placeholder first, then constrains recursively
 -- @
-inferLet :: CheckContext -> TypeEnv -> [Marked LetItem] -> InferM (TypeEnv, Map Name Scheme)
-inferLet ctx env items = do
+inferLet :: CheckContext -> TypeEnv -> [Marked LetItem] -> Expr -> InferM (TypeEnv, Map Name Scheme)
+inferLet ctx env items letBody = do
   let sigs = Map.fromList [(name, schemeFromAnnotation ty) | Marked _ (LetSignature name ty) <- items]
       itemDirectives =
         Map.fromListWith
@@ -643,8 +898,11 @@ inferLet ctx env items = do
           (Nothing, Just scheme) -> instantiate scheme
           (Nothing, Nothing) -> throwCheck (withCode TC0017MissingPlaceholder ("internal: missing placeholder for binding " <> show name))
         let directive = inlineDirective <|> Map.lookup name (sigDirectivesOf items)
+        -- A binding read more than once duplicates whatever it consumed, so
+        -- (for linearity) its right-hand side counts as used many times.
+        let readCount = usageCount name letBody + sum [usageCount name other | (otherName, (other, _)) <- Map.toList bindMap, otherName /= name]
         attempt <-
-          catchInfer $ do
+          catchInfer . withScale (if readCount == 1 then UOne else UMany) $ do
             actual <- checkAgainst ctx groupEnv expr expected
             _ <- atSpanOf expr (constrain ctx actual expected)
             zonk expected
@@ -680,49 +938,53 @@ inferLet ctx env items = do
 
 -- | Infer a recursive attribute set (`rec { ... }`).
 --
--- Field bindings may refer to one another, so each declared field name gets a
--- placeholder in scope before any field body is inferred — mirroring `let`.
--- `inherit` clauses resolve against the enclosing scope, not the rec scope.
+-- Fields may refer to one another, so — exactly like `let` — they are
+-- inferred one dependency group at a time and generalized as soon as their
+-- group is solved. A polymorphic field keeps its quantifiers in the record
+-- type (`{ id :: forall t0. t0 -> t0; }`) and is instantiated afresh at each
+-- selection, so `rec { id = x: x; a = id 1; b = id "s"; }` checks.
+-- `inherit x;` resolves against the enclosing scope, not the rec scope.
 inferRecAttrSet :: CheckContext -> TypeEnv -> [AttrItem] -> InferM Type
 inferRecAttrSet ctx env rawItems = do
   (items, dynamicEntries) <- normalizeAttrItems rawItems
-  -- Inherited names are rec fields too: `rec { inherit (src) version;
-  -- name = "x-${version}"; }` refers to the inherited `version`.
-  let fieldNames =
-        [name | AttrField name _ <- items]
-          <> concat [names | AttrInheritFrom _ names <- items]
-          <> concat [names | AttrInherit names <- items]
-  placeholders <- Map.fromList <$> traverse (\name -> (,) name . Scheme [] <$> freshMeta) fieldNames
-  let recEnv = placeholders <> env
-      inferAttr = \case
-        AttrField name expr -> do
-          ty <- inferExpr ctx recEnv expr
-          finalTy <- case Map.lookup name placeholders of
-            Just scheme -> do
-              expected <- instantiate scheme
-              _ <- constrain ctx ty expected
-              zonk expected
-            Nothing -> pure ty
-          pure [(name, finalTy)]
-        AttrInherit names ->
-          traverse (\name -> inferExpr ctx env (EVar name) >>= settle name) names
-        AttrInheritFrom source names ->
-          inferInheritFrom ctx recEnv source names >>= traverse (uncurry settle)
-        AttrPath _ _ -> pure []
-      -- Tie an inherited name's type to its rec placeholder.
-      settle name ty =
-        case Map.lookup name placeholders of
-          Just scheme -> do
-            expected <- instantiate scheme
-            _ <- constrain ctx ty expected
-            (,) name <$> zonk expected
-          Nothing -> pure (name, ty)
-  fields <- concat <$> traverse inferAttr items
-  case duplicateNames (map fst fields) of
+  let plainInherited = concat [names | AttrInherit names <- items]
+      binds =
+        [(name, expr) | AttrField name expr <- items]
+          <> [(name, ESelect source [SelectName name]) | AttrInheritFrom source names <- items, name <- names]
+      bindNames = map fst binds
+  case duplicateNames (bindNames <> plainInherited) of
     dup : _ -> throwCheck (withCode TC0002DuplicateAttribute ("duplicate attribute: " <> quoteName dup))
-    [] -> do
-      zonked <- Map.fromList <$> traverse (\(name, ty) -> (,) name <$> zonk ty) fields
-      finishAttrSet ctx recEnv dynamicEntries zonked
+    [] -> pure ()
+  hideNames (bindNames <> plainInherited) $ do
+    inherited <- forM plainInherited $ \name -> (,) name <$> (inferExpr ctx env (EVar name) >>= zonk)
+    let inheritedEnv = Map.fromList [(name, Scheme [] ty) | (name, ty) <- inherited]
+        bindMap = Map.fromList binds
+        bindSet = Set.fromList bindNames
+        groups =
+          stronglyConnComp
+            [(name, name, Set.toList (Set.intersection (exprFreeNames expr) bindSet)) | (name, expr) <- binds]
+        inferGroup (currentEnv, acc) members = do
+          placeholders <- Map.fromList <$> traverse (\name -> (,) name . Scheme [] <$> freshMeta) members
+          let groupEnv = placeholders <> currentEnv
+          results <- forM members $ \name -> do
+            expr <- maybe (throwCheck (withCode TC0017MissingPlaceholder ("internal: missing rec field " <> show name))) pure (Map.lookup name bindMap)
+            expected <- maybe (throwCheck (withCode TC0017MissingPlaceholder ("internal: missing placeholder for rec field " <> show name))) instantiate (Map.lookup name placeholders)
+            actual <- checkAgainst ctx groupEnv expr expected
+            _ <- atSpanOf expr (constrain ctx actual expected)
+            (,) name <$> zonk expected
+          generalized <- forM results $ \(name, ty) -> (,) name <$> generalize currentEnv ty
+          pure (Map.fromList generalized <> currentEnv, acc <> generalized)
+    (finalEnv, inferred) <- foldM inferGroup (inheritedEnv <> env, []) (map flattenSCC groups)
+    let fields =
+          Map.fromList
+            ( [(name, schemeType' scheme) | (name, scheme) <- inferred]
+                <> inherited
+            )
+    finishAttrSet ctx finalEnv dynamicEntries fields
+  where
+    schemeType' = \case
+      Scheme [] ty -> ty
+      Scheme vars ty -> TForall vars ty
 
 -- | Bind the names introduced by a lambda pattern.
 --
@@ -787,6 +1049,8 @@ inferStaticSelectKnown ctx resolvedTy base' field
   | base' == tAny = pure tAny
   | base' == tDynamic = pure tDynamic
   | base' == tUnknown = throwCheck (withCode TC0008SelectOnUnknown ("cannot select field " <> quoteName field <> " from unknown"))
+  | isOpaqueHead (checkAliases ctx) base' =
+      throwCheck (withCode TC0027OpaqueType ("cannot select field " <> quoteName field <> " from opaque type " <> showType base' <> "; cast it to its representation with `as` first"))
   | otherwise =
       case lookupRecordField (checkAliases ctx) resolvedTy field of
         Just fieldTy -> instantiate (schemeFromAnnotation fieldTy)
@@ -836,12 +1100,19 @@ selectionKeyNames = \case
 generalize :: TypeEnv -> Type -> InferM Scheme
 generalize env ty = do
   subst <- gets substitutions
-  let zonked = substituteMetas subst ty
+  let zonked0 = substituteMetas subst ty
       envMetas = foldMap (freeMetas . substituteMetas subst . schemeType) (Map.elems env)
+      -- A latent effect variable nobody else mentions means "pure".
+      lone = loneEffectMetas zonked0 `Set.difference` envMetas
+  let zonked = substituteMetas (Map.fromSet (const pureEffects) lone) zonked0
       quantifiable = sort (Set.toList (freeMetas zonked `Set.difference` envMetas))
+      effectsOnly = effectOnlyMetas zonked
       taken = freeTypeVars zonked
-      names = take (length quantifiable) [name | i <- [0 :: Int ..], let name = T.pack ("t" <> show i), not (Set.member name taken)]
-      renaming = Map.fromList (zip quantifiable (TVar <$> names))
+      fresh prefix = [name | i <- [0 :: Int ..], let name = T.pack (prefix <> show i), not (Set.member name taken)]
+      typeMetas = filter (not . (`Set.member` effectsOnly)) quantifiable
+      effectMetas = filter (`Set.member` effectsOnly) quantifiable
+      renaming = Map.fromList (zip typeMetas (TVar <$> fresh "t") <> zip effectMetas (TVar <$> fresh "e"))
+      names = take (length typeMetas) (fresh "t") <> take (length effectMetas) (fresh "e")
   pure (Scheme names (substituteMetas renaming zonked))
 
 -- | Names a binding's expression refers to (an over-approximation that
@@ -867,6 +1138,7 @@ exprFreeNames = go
       EIf c a b -> go c <> go a <> go b
       EList xs -> foldMap go xs
       ECast e _ -> go e
+      EAscribe e _ -> go e
       EInterp _ parts -> foldMap goPart parts
       EPathInterp parts -> foldMap goPart parts
       _ -> Set.empty
@@ -890,6 +1162,267 @@ exprFreeNames = go
       AttrInherit names -> Set.fromList names
       AttrInheritFrom src _ -> go src
       AttrPath steps e -> foldMap goStep steps <> go e
+
+-- * Effects
+
+-- | An arrow whose latent effect row is exactly these labels.
+effectfulArrow :: [Name] -> Arrow
+effectfulArrow labels = (plainArrow Many){arrowEffects = effectRow labels Nothing}
+
+-- | `builtins` values (not functions) whose mere evaluation is impure.
+impureValues :: [Name]
+impureValues = ["currentTime", "currentSystem", "nixPath"]
+
+-- | Record that the current computation performs an effect row: a callee's
+-- latent effects, or a primitive effect such as a failed `assert`.
+perform :: CheckContext -> Type -> InferM ()
+perform ctx row = do
+  row' <- zonk row
+  when (checkPureEval ctx && "Impure" `elem` effectLabels row') $
+    throwCheck (withCode TC0024ImpureInPureEval "impure operation in pure evaluation: flakes cannot read the environment, the clock, or the host platform")
+  ambient <- gets currentEffects
+  subsumeEffects row' ambient
+
+-- | Check a latent effect row against an expected one. Untracked rows on
+-- either side are the gradual case.
+constrainEffects :: Type -> Type -> InferM ()
+constrainEffects actual expected = do
+  actual' <- zonk actual
+  expected' <- zonk expected
+  unless (actual' == TDynamic || expected' == TDynamic) (subsumeEffects actual' expected')
+
+-- | Make @target@ admit every effect of @actual@: each label must be present
+-- (an open tail is extended), and an effect variable of @actual@ must be the
+-- target's own. An unsolved actual tail is unified with the target, which is
+-- how a call to an unknown function inherits the effects of its context.
+subsumeEffects :: Type -> Type -> InferM ()
+subsumeEffects actual target = do
+  actual' <- zonk actual
+  case actual' of
+    TDynamic -> pure ()
+    TRecord fields -> mapM_ (requireLabel target) (Map.keys fields)
+    TOpenRecord fields tail' -> mapM_ (requireLabel target) (Map.keys fields) *> requireTail tail'
+    other -> requireTail other
+  where
+    requireTail = \case
+      TMeta m -> do
+        target' <- zonk target
+        unless (Set.member m (freeMetas target')) (void (bindMeta m target'))
+      TVar var -> requireVar var target
+      _ -> pure ()
+
+requireLabel :: Type -> Name -> InferM ()
+requireLabel row label =
+  zonk row >>= \case
+    TDynamic -> pure ()
+    TMeta n -> do
+      rest <- freshMeta
+      void (bindMeta n (effectRow [label] (Just rest)))
+    TOpenRecord fields rest
+      | Map.member label fields -> pure ()
+      | otherwise -> requireLabel rest label
+    TRecord fields
+      | Map.member label fields -> pure ()
+    other ->
+      throwCheck
+        ( withCode
+            TC0023EffectNotAllowed
+            ("effect `" <> T.unpack label <> "` is not allowed here: the expected effects are " <> showEffects other)
+        )
+
+requireVar :: Name -> Type -> InferM ()
+requireVar var row =
+  zonk row >>= \case
+    TDynamic -> pure ()
+    TMeta n -> void (bindMeta n (TVar var))
+    TOpenRecord _ rest -> requireVar var rest
+    TVar other | other == var -> pure ()
+    other ->
+      throwCheck
+        ( withCode
+            TC0023EffectNotAllowed
+            ("effects `" <> T.unpack var <> "` of a polymorphic callee are not allowed here: the expected effects are " <> showEffects other)
+        )
+
+showEffects :: Type -> String
+showEffects = \case
+  TRecord fields
+    | Map.null fields -> "{} (pure)"
+    | otherwise -> labels fields ""
+  TOpenRecord fields (TVar var) -> labels fields (" | " <> T.unpack var)
+  TOpenRecord fields _ -> labels fields ", ..."
+  TVar var -> T.unpack var
+  other -> showType other
+  where
+    labels fields rest = "{" <> intercalate ", " (map T.unpack (Map.keys fields)) <> rest <> "}"
+
+-- | Effects a handler discharges from its argument: `builtins.tryEval`
+-- catches `throw` and failed assertions.
+handledEffects :: Expr -> [Name]
+handledEffects fun =
+  case unloc fun of
+    ESelect base [SelectName "tryEval"]
+      | EVar "builtins" <- unloc base -> ["Throw"]
+    _ -> []
+
+-- | Run @action@ in its own effect scope, then perform what it performed
+-- minus the @handled@ labels.
+handleEffects :: CheckContext -> [Name] -> InferM a -> InferM a
+handleEffects _ [] action = action
+handleEffects ctx handled action = do
+  outer <- gets currentEffects
+  inner <- freshMeta
+  modify' (\st -> st{currentEffects = inner})
+  result <- action
+  modify' (\st -> st{currentEffects = outer})
+  performed <- zonk inner
+  let remaining = case performed of
+        TRecord fields -> TRecord (foldr Map.delete fields handled)
+        TOpenRecord fields tail' -> mkOpenRecord (foldr Map.delete fields handled) tail'
+        other -> other
+  perform ctx remaining
+  pure result
+
+-- * Dependent application
+
+-- | The index a dependent arrow's binder stands for at one call: the
+-- singleton of a dependent variable, or the argument's precise type when it
+-- is fully known, and otherwise just the parameter type.
+dependentIndex :: TypeEnv -> Expr -> Type -> Type -> InferM Type
+dependentIndex env arg argTy domTy =
+  case unloc arg of
+    EVar name
+      | Just (Scheme [] singleton@(TSingleton _ _)) <- Map.lookup name env -> pure singleton
+    _ -> do
+      argTy' <- zonk argTy
+      pure $
+        if Set.null (freeTypeMetas argTy') && not (hasDynamic argTy')
+          then argTy'
+          else domTy
+
+-- * Linearity
+
+-- | Count one consumption of @name@ if it is a tracked lambda binder.
+noteUse :: Name -> InferM ()
+noteUse name =
+  modify' $ \st ->
+    case Map.lookup name (usages st) of
+      Just (depth, usage) ->
+        let amount = if lambdaDepth st > depth then UMany else usageScale st
+         in st{usages = Map.insert name (depth, addUsage usage amount) (usages st)}
+      Nothing -> st
+
+-- | Scale the consumptions inside @action@: under an unrestricted function
+-- every use counts as many.
+withScale :: Usage -> InferM a -> InferM a
+withScale scale action = do
+  outer <- gets usageScale
+  let scaled = if outer == UMany || scale == UMany then UMany else UOne
+  modify' (\st -> st{usageScale = scaled})
+  result <- action
+  modify' (\st -> st{usageScale = outer})
+  pure result
+
+-- | Enter a lambda body: one level deeper, consumed once per call.
+inLambdaBody :: InferM a -> InferM a
+inLambdaBody action = do
+  st <- get
+  put st{lambdaDepth = lambdaDepth st + 1, usageScale = UOne}
+  result <- action
+  modify' (\st' -> st'{lambdaDepth = lambdaDepth st, usageScale = usageScale st})
+  pure result
+
+-- | Track the binder of a lambda pattern while its body is inferred, and
+-- report how it was consumed. Attribute-set patterns are never linear.
+trackPattern :: Pattern -> InferM a -> InferM (a, Usage)
+trackPattern pattern' action =
+  case pattern' of
+    PVar name _ -> do
+      st <- get
+      let saved = Map.lookup name (usages st)
+      put st{usages = Map.insert name (lambdaDepth st + 1, UZero) (usages st)}
+      result <- action
+      usage <- gets (maybe UZero snd . Map.lookup name . usages)
+      modify' (\st' -> st'{usages = maybe (Map.delete name) (Map.insert name) saved (usages st')})
+      pure (result, usage)
+    _ -> (,UMany) <$> hideNames (patternBoundNames pattern') action
+
+-- | Stop tracking names that a binding form shadows.
+hideNames :: [Name] -> InferM a -> InferM a
+hideNames names action = do
+  saved <- gets (\st -> Map.restrictKeys (usages st) (Set.fromList names))
+  if Map.null saved
+    then action
+    else do
+      modify' (\st -> st{usages = Map.withoutKeys (usages st) (Set.fromList names)})
+      result <- action
+      modify' (\st -> st{usages = Map.union saved (usages st)})
+      pure result
+
+-- | Names a `let` block binds.
+letBoundNames :: [Marked LetItem] -> [Name]
+letBoundNames = concatMap (names . markedValue)
+  where
+    names = \case
+      LetBinding name _ -> [name]
+      LetPath (SelectName name : _) _ -> [name]
+      LetInherit _ inherited -> inherited
+      _ -> []
+
+-- | Free variables of an expression, respecting lambda, `let`, and `rec`
+-- scoping (unlike 'exprFreeNames', which over-approximates).
+freeVariables :: Expr -> Set.Set Name
+freeVariables = go
+  where
+    go = \case
+      EVar name -> Set.singleton name
+      ELoc _ inner -> go inner
+      ELambda pat body ->
+        (goPat pat <> go body) `Set.difference` Set.fromList (patternBoundNames pat)
+      EApp f x -> go f <> go x
+      EBinaryOp _ l r -> go l <> go r
+      EUnaryOp _ x -> go x
+      ELet items body ->
+        (foldMap (goLet . markedValue) items <> go body) `Set.difference` Set.fromList (letBoundNames items)
+      EAttrSet items -> foldMap goAttr items
+      ERec items -> foldMap goAttr items `Set.difference` Set.fromList (concatMap attrNames items)
+      ESelect base steps -> go base <> foldMap goStep steps
+      ESelectOr base steps def -> go base <> foldMap goStep steps <> go def
+      EHasAttr base steps -> go base <> foldMap goStep steps
+      EAssert c b -> go c <> go b
+      EWith sc b -> go sc <> go b
+      EIf c a b -> go c <> go a <> go b
+      EList xs -> foldMap go xs
+      ECast e _ -> go e
+      EAscribe e _ -> go e
+      EInterp _ parts -> foldMap goPart parts
+      EPathInterp parts -> foldMap goPart parts
+      _ -> Set.empty
+    goPart = \case
+      StrExpr e -> go e
+      _ -> Set.empty
+    goStep = \case
+      SelectDynamic e -> go e
+      SelectName _ -> Set.empty
+    goPat = \case
+      PAttrSet fields _ _ -> foldMap (foldMap go . patternFieldDefault) fields
+      PVar _ _ -> Set.empty
+    goLet = \case
+      LetBinding _ e -> go e
+      LetInherit (Just src) _ -> go src
+      LetInherit Nothing names -> Set.fromList names
+      LetPath steps e -> foldMap goStep steps <> go e
+      LetSignature _ _ -> Set.empty
+    goAttr = \case
+      AttrField _ e -> go e
+      AttrInherit names -> Set.fromList names
+      AttrInheritFrom src _ -> go src
+      AttrPath steps e -> foldMap goStep steps <> go e
+    attrNames = \case
+      AttrField name _ -> [name]
+      AttrPath (SelectName name : _) _ -> [name]
+      AttrInheritFrom _ names -> names
+      _ -> []
 
 -- | Instantiate a polymorphic scheme by replacing quantified variables with
 -- fresh inference metas.
@@ -931,7 +1464,7 @@ inferRootExpression ctx env (Marked directive expr) = do
     catchInfer $
       case unloc expr of
         ELet items body -> do
-          (env', bindings) <- inferLet ctx env items
+          (env', bindings) <- inferLet ctx env items body
           ty <- inferExpr ctx env' body >>= zonk
           displayed <- traverse displayScheme bindings
           pure (CheckResult (Just (hideSingletonRows (closeMetas ty))) displayed)
@@ -950,8 +1483,9 @@ inferRootExpression ctx env (Marked directive expr) = do
 -- any metas that are still open, for stable user-facing output.
 displayScheme :: Scheme -> InferM Scheme
 displayScheme (Scheme vars ty) = do
-  zonked <- zonk ty
-  let metas = sort (Set.toList (freeMetas zonked))
+  zonked0 <- zonk ty
+  let zonked = substituteMetas (Map.fromSet (const pureEffects) (loneEffectMetas zonked0)) zonked0
+      metas = sort (Set.toList (freeMetas zonked))
       taken = Set.fromList vars <> freeTypeVars zonked
       names = take (length metas) [name | i <- [0 :: Int ..], let name = T.pack ("t" <> show i), not (Set.member name taken)]
   pure (hideSingletonRows (Scheme (vars <> names) (substituteMetas (Map.fromList (zip metas (TVar <$> names))) zonked)))
@@ -966,7 +1500,7 @@ hideSingletonRows (Scheme vars ty) =
         TOpenRecord fields (TVar name) | single name -> TOpenRecord (fmap hide fields) TDynamic
         TOpenRecord fields tail' -> TOpenRecord (fmap hide fields) (hide tail')
         TRecord fields -> TRecord (fmap hide fields)
-        TFun mult a b -> TFun mult (hide a) (hide b)
+        TArrow arrow a b -> TArrow arrow (hide a) (hide b)
         TApp f x -> TApp (hide f) (hide x)
         TUnion members -> TUnion (map hide members)
         TOptional inner -> TOptional (hide inner)
@@ -1023,7 +1557,10 @@ recoverSuppressedType ctx expected = constrain ctx tDynamic expected *> zonk exp
 --   => succeeds, because the mismatch is genuinely gradual
 -- @
 constrain :: CheckContext -> Type -> Type -> InferM Type
-constrain ctx actual expected = do
+constrain ctx actualRaw expected = do
+  -- A polymorphic value may be used at any instance (a `rec` field such as
+  -- `id :: forall t0. t0 -> t0` meeting `Int -> Int`).
+  actual <- zonkHead actualRaw >>= instantiateRank
   decomposed <- constrainStructurally ctx actual expected
   case decomposed of
     Just result -> pure result
@@ -1081,7 +1618,7 @@ constrainStructurally ctx actual expected = do
       case attempt of
         Right _ -> Just <$> zonk expected
         Left _ -> firstSuccess rest
-    hasMetaInside ty = not (Set.null (freeMetas ty))
+    hasMetaInside ty = not (Set.null (freeTypeMetas ty))
 
 -- | Chase a chain of solved metas at the top of a type only, leaving the
 -- children (and any metas inside them) untouched.
@@ -1143,9 +1680,18 @@ constrainResolved ctx actual expected = do
     (TTypeList xs, TTypeList ys)
       | length xs == length ys ->
           TTypeList <$> zipWithM (constrain ctx) xs ys
-    (TFun actualMult actualArg actualResult, TFun expectedMult expectedArg expectedResult)
-      | multiplicitySubtype actualMult expectedMult ->
-          TFun expectedMult <$> constrain ctx expectedArg actualArg <*> constrain ctx actualResult expectedResult
+    (TArrow actualArrow actualArg actualResult, TArrow expectedArrow expectedArg expectedResult)
+      | multiplicitySubtype (arrowMult actualArrow) (arrowMult expectedArrow) -> do
+          constrainEffects (arrowEffects actualArrow) (arrowEffects expectedArrow)
+          unless (capturesWithin (arrowCaptures actualArrow) (arrowCaptures expectedArrow)) $
+            throwCheck (withCode TC0025CaptureNotAllowed ("closure captures more than its expected type allows: " <> showType actual' <> " vs " <> showType expected'))
+          _ <- constrain ctx expectedArg actualArg
+          -- Dependent binders on either side denote the same argument.
+          let shared = TSingleton "it" expectedArg
+          _ <- constrain ctx (eraseBinder actualArrow shared actualResult) (eraseBinder expectedArrow shared expectedResult)
+          zonk expected'
+      | otherwise ->
+          throwCheck (withCode TC0026LinearityViolation ("expected a linear function (`%1 ->`), but got an unrestricted one: " <> showType actual'))
     (TOptional a, TOptional b) -> TOptional <$> constrain ctx a b
     _
       | hasUnresolvedMetas actual' expected',
@@ -1154,11 +1700,15 @@ constrainResolved ctx actual expected = do
           constrainRecord ctx actualFields actualTail expectedFields
           -- An open expected row (`{ ...r }` from a signature) captures the
           -- fields the expectation did not mention, so `r` is solved.
+          -- When both sides already share that row (a record meeting
+          -- itself through an instantiated signature), there is nothing to
+          -- capture, and binding it would only build an infinite row.
           case expectedTail of
-            Just (TMeta n) -> do
-              let extra = Map.difference actualFields expectedFields
-              _ <- bindMeta n (maybe (TRecord extra) (mkOpenRecord extra) actualTail)
-              pure ()
+            Just (TMeta n)
+              | actualTail /= Just (TMeta n) -> do
+                  let extra = Map.difference actualFields expectedFields
+                  _ <- bindMeta n (maybe (TRecord extra) (mkOpenRecord extra) actualTail)
+                  pure ()
             _ -> pure ()
           zonk expected'
       | hasUnresolvedMetas actual' expected',
@@ -1275,9 +1825,12 @@ unify ctx left right = do
         Just rightList <- sequenceListView right',
         hasUnresolvedMetas left' right' || not (isSubtype (checkAliases ctx) left' right' || isSubtype (checkAliases ctx) right' left') ->
           unify ctx leftList rightList
-    (TFun leftMult a b, TFun rightMult c d)
-      | leftMult == rightMult ->
-          TFun leftMult <$> unify ctx a c <*> unify ctx b d
+    (TArrow leftArrow a b, TArrow rightArrow c d)
+      | arrowMult leftArrow == arrowMult rightArrow -> do
+          effects <- unifyEffects (arrowEffects leftArrow) (arrowEffects rightArrow)
+          dom <- unify ctx a c
+          cod <- unify ctx (eraseBinder leftArrow dom b) (eraseBinder rightArrow dom d)
+          pure (TArrow leftArrow{arrowEffects = effects, arrowBinder = Nothing} dom cod)
     (TRecord a, TRecord b) -> unifyRecord a b
     _
       | Just (a, ta) <- recordView left',
@@ -1318,6 +1871,19 @@ unify ctx left right = do
             <&> TRecord
       | otherwise = throwCheck (withCode TC0014RecordMismatch ("record mismatch: " <> showRecord a <> " vs " <> showRecord b))
 
+-- | Unify two latent effect rows; an untracked row defers to the other.
+unifyEffects :: Type -> Type -> InferM Type
+unifyEffects left right = do
+  left' <- zonk left
+  right' <- zonk right
+  case (left', right') of
+    (TDynamic, _) -> pure right'
+    (_, TDynamic) -> pure left'
+    _ -> do
+      subsumeEffects left' right'
+      subsumeEffects right' left'
+      zonk left'
+
 -- | Bind one inference meta to a solved type, performing the occurs check.
 bindMeta :: Int -> Type -> InferM Type
 bindMeta n ty = do
@@ -1353,12 +1919,15 @@ checkCast ctx actual expected = do
   actual' <- normalizeIndexedType . resolveHead (checkAliases ctx) <$> zonk actual
   expected' <- normalizeIndexedType . resolveHead (checkAliases ctx) <$> zonk expected
   let aliases = checkAliases ctx
+  -- An opaque type is converted to and from its representation only here.
+  let reveal ty = fromMaybe ty (revealOpaque aliases ty)
+      related a b = isSubtype aliases a b || isSubtype aliases b a || isConsistent aliases a b
   if hasUnresolvedMetas actual' expected'
-    then unify ctx actual' expected' $> expected
+    then unify ctx (reveal actual') (reveal expected') $> expected
     else
-      if isSubtype aliases actual' expected'
-        || isSubtype aliases expected' actual'
-        || isConsistent aliases actual' expected'
+      if related actual' expected'
+        || related (reveal actual') expected'
+        || related actual' (reveal expected')
         then pure expected
         else throwCheck (withCode TC0015InvalidCast ("invalid cast: " <> showType actual' <> " as " <> showType expected'))
 
@@ -1707,16 +2276,6 @@ showType = T.unpack . T.unwords . map T.strip . T.lines . renderType
 showRecord :: Map Name Type -> String
 showRecord = showType . TRecord
 
--- | Infer a lambda's multiplicity from its body usage count.
---
--- A binder used exactly once becomes linear; anything else becomes
--- unrestricted. This is intentionally local and syntactic.
-inferLambdaMultiplicity :: Pattern -> Expr -> Multiplicity
-inferLambdaMultiplicity pattern' body =
-  case pattern' of
-    PVar name _ | usageCount name body == 1 -> One
-    _ -> Many
-
 -- | Count syntactic occurrences of a binder in an expression.
 --
 -- Shadowing stops the walk for the shadowed name, and recursive `let`
@@ -1747,7 +2306,7 @@ usageCount target = go
       EBinaryOp _ left right -> go left + go right
       EUnaryOp _ operand -> go operand
       ELet items body ->
-        let names = concatMap (letBoundNames . markedValue) items
+        let names = concatMap (letBoundNames' . markedValue) items
          in if target `elem` names
               then 0
               else sum (map (letItemCount . markedValue) items) + go body
@@ -1763,6 +2322,7 @@ usageCount target = go
       EWith scope body -> go scope + go body
       EList items -> sum (map go items)
       ECast expr _ -> go expr
+      EAscribe expr _ -> go expr
     letItemCount = \case
       LetSignature _ _ -> 0
       LetBinding _ expr -> go expr
@@ -1773,7 +2333,7 @@ usageCount target = go
       AttrInherit names -> length (filter (== target) names)
       AttrInheritFrom source _ -> go source
       AttrPath steps expr -> sum (map selectStepCount steps) + go expr
-    letBoundNames = \case
+    letBoundNames' = \case
       LetBinding name _ -> [name]
       LetPath (SelectName name : _) _ -> [name]
       LetInherit _ names -> names
@@ -1830,7 +2390,7 @@ allowsGradualConsistency left right = hasDynamic left || hasDynamic right
 
 -- | Check whether either side still contains unsolved metas.
 hasUnresolvedMetas :: Type -> Type -> Bool
-hasUnresolvedMetas left right = not (Set.null (freeMetas left <> freeMetas right))
+hasUnresolvedMetas left right = not (Set.null (freeTypeMetas left <> freeTypeMetas right))
 
 -- | Detect whether a type tree mentions `dynamic` anywhere inside it.
 hasDynamic :: Type -> Bool

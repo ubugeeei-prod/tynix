@@ -196,6 +196,46 @@ in timeoutS
 # => rejected
 ```
 
+### 14. Effects
+
+Function types record the effects a call may perform: `String -> String ! {
+Trace }`. Effects are inferred from the builtins a body calls, generalized
+like type variables (`twice :: forall t0 e0. (t0 -> t0 ! e0) -> t0 -> t0 !
+e0`), bounded by signatures (`! {}` demands purity), and discharged by
+handlers (`builtins.tryEval` catches `Throw`). `flake.tynix` files must not
+perform `Impure`. Arrows written without `!` stay untracked.
+
+### 15. Linear types
+
+`A %1 -> B` consumes its argument exactly once on every path; closures and
+unrestricted calls count as many uses.
+
+### 16. Capture tracking
+
+`A ->{c} B` bounds the effectful capabilities a closure captures.
+
+### 17. Dependent arrows
+
+`(n :: Nat) -> Vec n a` lets the result depend on the argument's value,
+computed with the `Get`, `KeyOf`, `Length`, `Add`, `Sub`, and `Mul` operators.
+
+### 18. Opaque and phantom types
+
+`opaque type Id t = String;` is nominal and invariant, so phantom parameters
+are meaningful.
+
+### 19. Higher-rank polymorphism and kind annotations
+
+`forall` may appear in argument positions, `rec` fields generalize like `let`
+bindings, and alias parameters accept kinds such as `(f :: Type -> Type)`.
+
+### 20. Macros
+
+Hygienic, declarative, typed macros: `macro name { (pattern) => (template); };`.
+
+See [Effects, Linearity & Macros](./reference/advanced-types.md) for the full
+rules.
+
 ## Consistency and Partial Adoption
 
 `tynix` checks both subtyping and consistency.
@@ -353,7 +393,8 @@ root is emitted as a single `default` member with a `forall`.
 - type classes, so constraint contexts are enforced
 - flow-sensitive narrowing through `isAttrs`, `?` and `_tag` guards
 - `config`-aware typing of NixOS modules
-- implementing records whose fields carry their own `forall`
+- arithmetic on dependent singletons (`Vec (Add n 1) a` vs `Vec n a`)
+- exporting macros from declaration files
 - stronger bidirectional checking
 - exhaustiveness hints
 - richer declaration merging

@@ -64,6 +64,10 @@
         "named": true
       },
       {
+        "type": "macro_invocation",
+        "named": true
+      },
+      {
         "type": "parenthesized_expression",
         "named": true
       },
@@ -238,6 +242,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -305,6 +313,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -409,6 +421,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -554,6 +570,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -717,6 +737,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -816,6 +840,22 @@
     "fields": {}
   },
   {
+    "type": "capture_set",
+    "named": true,
+    "fields": {
+      "capability": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "cast_expression",
     "named": true,
     "fields": {
@@ -865,6 +905,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -1112,6 +1156,58 @@
     }
   },
   {
+    "type": "dependent_parameter",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_variable",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "effect_row",
+    "named": true,
+    "fields": {
+      "effect": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "effect_label",
+            "named": true
+          }
+        ]
+      },
+      "tail": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "forall_type",
     "named": true,
     "fields": {
@@ -1258,6 +1354,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1335,12 +1435,36 @@
     "type": "function_type",
     "named": true,
     "fields": {
+      "captures": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "capture_set",
+            "named": true
+          }
+        ]
+      },
+      "effects": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "effect_row",
+            "named": true
+          }
+        ]
+      },
       "parameter": {
         "multiple": false,
         "required": true,
         "types": [
           {
             "type": "builtin_type",
+            "named": true
+          },
+          {
+            "type": "dependent_parameter",
             "named": true
           },
           {
@@ -1459,6 +1583,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -1692,6 +1820,94 @@
     }
   },
   {
+    "type": "kind_arrow",
+    "named": true,
+    "fields": {
+      "parameter": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "(",
+            "named": false
+          },
+          {
+            "type": ")",
+            "named": false
+          },
+          {
+            "type": "kind",
+            "named": true
+          },
+          {
+            "type": "kind_arrow",
+            "named": true
+          }
+        ]
+      },
+      "result": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "(",
+            "named": false
+          },
+          {
+            "type": ")",
+            "named": false
+          },
+          {
+            "type": "kind",
+            "named": true
+          },
+          {
+            "type": "kind_arrow",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "kinded_parameter",
+    "named": true,
+    "fields": {
+      "kind": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "(",
+            "named": false
+          },
+          {
+            "type": ")",
+            "named": false
+          },
+          {
+            "type": "kind",
+            "named": true
+          },
+          {
+            "type": "kind_arrow",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "let_attrset_expression",
     "named": true,
     "fields": {},
@@ -1772,6 +1988,10 @@
           },
           {
             "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
             "named": true
           },
           {
@@ -1865,6 +2085,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1928,6 +2152,276 @@
     }
   },
   {
+    "type": "macro_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "rule": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "macro_rule",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "macro_invocation",
+    "named": true,
+    "fields": {
+      "argument": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "[",
+            "named": false
+          },
+          {
+            "type": "]",
+            "named": false
+          },
+          {
+            "type": "float_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "indented_string_expression",
+            "named": true
+          },
+          {
+            "type": "integer_expression",
+            "named": true
+          },
+          {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
+            "type": "macro_punctuation",
+            "named": true
+          },
+          {
+            "type": "macro_repetition",
+            "named": true
+          },
+          {
+            "type": "macro_token_tree",
+            "named": true
+          },
+          {
+            "type": "metavariable",
+            "named": true
+          },
+          {
+            "type": "path_expression",
+            "named": true
+          },
+          {
+            "type": "string_expression",
+            "named": true
+          },
+          {
+            "type": "{",
+            "named": false
+          },
+          {
+            "type": "}",
+            "named": false
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "macro_repetition",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "float_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "indented_string_expression",
+          "named": true
+        },
+        {
+          "type": "integer_expression",
+          "named": true
+        },
+        {
+          "type": "macro_invocation",
+          "named": true
+        },
+        {
+          "type": "macro_punctuation",
+          "named": true
+        },
+        {
+          "type": "macro_repetition",
+          "named": true
+        },
+        {
+          "type": "macro_token_tree",
+          "named": true
+        },
+        {
+          "type": "metavariable",
+          "named": true
+        },
+        {
+          "type": "path_expression",
+          "named": true
+        },
+        {
+          "type": "string_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "macro_rule",
+    "named": true,
+    "fields": {
+      "pattern": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "macro_token_tree",
+            "named": true
+          }
+        ]
+      },
+      "template": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "macro_token_tree",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "macro_token_tree",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "float_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "indented_string_expression",
+          "named": true
+        },
+        {
+          "type": "integer_expression",
+          "named": true
+        },
+        {
+          "type": "macro_invocation",
+          "named": true
+        },
+        {
+          "type": "macro_punctuation",
+          "named": true
+        },
+        {
+          "type": "macro_repetition",
+          "named": true
+        },
+        {
+          "type": "macro_token_tree",
+          "named": true
+        },
+        {
+          "type": "metavariable",
+          "named": true
+        },
+        {
+          "type": "path_expression",
+          "named": true
+        },
+        {
+          "type": "string_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "metavariable",
+    "named": true,
+    "fields": {
+      "fragment": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "fragment",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "metavariable_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "optional_type_signature",
     "named": true,
     "fields": {
@@ -1967,6 +2461,16 @@
         "types": [
           {
             "type": "_expression",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "_type",
             "named": true
           }
         ]
@@ -2126,6 +2630,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2192,6 +2700,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2234,6 +2746,10 @@
         "types": [
           {
             "type": "ambient_declaration",
+            "named": true
+          },
+          {
+            "type": "macro_declaration",
             "named": true
           },
           {
@@ -2285,6 +2801,16 @@
     "type": "type_alias",
     "named": true,
     "fields": {
+      "modifier": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "opaque",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -2299,6 +2825,10 @@
         "multiple": true,
         "required": false,
         "types": [
+          {
+            "type": "kinded_parameter",
+            "named": true
+          },
           {
             "type": "type_variable",
             "named": true
@@ -2540,6 +3070,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2722,6 +3256,10 @@
             "named": true
           },
           {
+            "type": "macro_invocation",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2785,6 +3323,10 @@
   },
   {
     "type": "\"",
+    "named": false
+  },
+  {
+    "type": "$(",
     "named": false
   },
   {
@@ -2942,6 +3484,10 @@
     "named": false
   },
   {
+    "type": "effect_label",
+    "named": true
+  },
+  {
     "type": "ellipses",
     "named": true
   },
@@ -2964,6 +3510,10 @@
   {
     "type": "forall",
     "named": false
+  },
+  {
+    "type": "fragment",
+    "named": true
   },
   {
     "type": "identifier",
@@ -2990,11 +3540,31 @@
     "named": true
   },
   {
+    "type": "kind",
+    "named": true
+  },
+  {
     "type": "let",
     "named": false
   },
   {
+    "type": "macro",
+    "named": false
+  },
+  {
+    "type": "macro_punctuation",
+    "named": true
+  },
+  {
+    "type": "metavariable_name",
+    "named": true
+  },
+  {
     "type": "multiplicity",
+    "named": true
+  },
+  {
+    "type": "opaque",
     "named": true
   },
   {

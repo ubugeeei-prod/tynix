@@ -19,9 +19,9 @@ spec = describe "higher-kinded kind inference" $ do
     kinds <-
       expectRight $
         inferAliasKinds
-          [ TypeAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
-            TypeAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a")),
-            TypeAlias "Twice" ["f", "a"] (TApp (TVar "f") (TApp (TVar "f") (TVar "a")))
+          [ plainAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
+            plainAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a")),
+            plainAlias "Twice" ["f", "a"] (TApp (TVar "f") (TApp (TVar "f") (TVar "a")))
           ]
     inferTypeKind kinds (TApp (TApp (TCon "Apply") (TCon "Box")) tInt)
       `shouldBe` Right KType
@@ -32,14 +32,14 @@ spec = describe "higher-kinded kind inference" $ do
     kinds <-
       expectRight $
         inferAliasKinds
-          [ TypeAlias "Id" ["f"] (TVar "f"),
-            TypeAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a"))
+          [ plainAlias "Id" ["f"] (TVar "f"),
+            plainAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a"))
           ]
     inferTypeKind kinds (TApp (TApp (TCon "Apply") (TApp (TCon "Id") (TCon "List"))) tInt)
       `shouldBe` Right KType
 
   it "rejects applying concrete types as constructors" $
-    inferAliasKinds [TypeAlias "Bad" ["a"] (TApp tInt (TVar "a"))]
+    inferAliasKinds [plainAlias "Bad" ["a"] (TApp tInt (TVar "a"))]
       `shouldSatisfy` isLeft
 
   it "rejects oversaturated constructors" $
@@ -102,9 +102,9 @@ spec = describe "higher-kinded kind inference" $ do
     kinds <-
       expectRight $
         inferAliasKinds
-          [ TypeAlias "Ground" [] tInt,
-            TypeAlias "Wrap" ["a"] (tList (TVar "a")),
-            TypeAlias "Const" ["a", "b"] (TVar "a")
+          [ plainAlias "Ground" [] tInt,
+            plainAlias "Wrap" ["a"] (tList (TVar "a")),
+            plainAlias "Const" ["a", "b"] (TVar "a")
           ]
     Map.lookup "Ground" kinds `shouldBe` Just KType
     Map.lookup "Wrap" kinds `shouldBe` Just (KFun KType KType)
@@ -121,13 +121,13 @@ spec = describe "higher-kinded kind inference" $ do
     kinds <-
       expectRight $
         inferAliasKinds
-          [ TypeAlias "Dup" ["a"] (TVar "a"),
-            TypeAlias "Dup" [] tInt
+          [ plainAlias "Dup" ["a"] (TVar "a"),
+            plainAlias "Dup" [] tInt
           ]
     Map.lookup "Dup" kinds `shouldBe` Just KType
 
   it "rejects a self-application that would need an infinite kind" $
-    inferAliasKinds [TypeAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))]
+    inferAliasKinds [plainAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))]
       `shouldSatisfy` isLeft
 
   it "rejects undersaturated constructors in term positions" $ do

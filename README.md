@@ -29,10 +29,13 @@ Add types where they help, keep the rest dynamic, and ship plain <code>.nix</cod
   - semantic preservation
   - strong editor tooling
 - Be expressive enough for type-level programming
-  - parametric polymorphism
-  - higher-kinded types
-  - conditional types
-  - `infer`-style type decomposition
+  - Hindley-Milner inference with let- and `rec`-polymorphism and higher-rank types
+  - higher-kinded types with kind annotations
+  - conditional types and `infer`-style type decomposition
+  - effects (`! { Trace, Throw }`), effect polymorphism, and pure flakes
+  - linear arrows (`%1 ->`) and capture sets (`->{fetch}`)
+  - dependent arrows (`(n :: Nat) -> Vec n a`) and opaque / phantom types
+  - hygienic, declarative, typed macros
 - Use structural subtyping and `dynamic`, `unknown`, and `any` as the core gradual typing tools
 
 ## File Kinds

@@ -84,10 +84,10 @@ in greet {
 <h3>Type existing .nix</h3>
 <p>Describe modules you will not rewrite with <code>.d.tynix</code> declarations, the way DefinitelyTyped describes JavaScript.</p>
 </a>
-<a class="tx-feature" href="./tutorial/generics.md">
+<a class="tx-feature" href="./reference/advanced-types.md">
 <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 7l-7 9 7 9M21 7l7 9-7 9"/><path class="a" d="M14 21l4-10M13 14h6"/></svg>
-<h3>Generics and conditional types</h3>
-<p><code>forall</code>, higher-kinded aliases, <code>extends</code> and <code>infer</code>, and <code>Vec</code> / <code>Matrix</code> shapes, checked by a kind-aware engine.</p>
+<h3>Types that say more</h3>
+<p>Hindley-Milner with higher-rank and higher-kinded types, effects such as <code>! { Trace }</code>, linear arrows, dependent and opaque types, and hygienic, typed macros.</p>
 </a>
 <a class="tx-feature" href="./tutorial/editor.md">
 <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="24" height="20" rx="3"/><path d="M4 11h24"/><path class="a" d="M10 18.5l3 3 6-6"/></svg>

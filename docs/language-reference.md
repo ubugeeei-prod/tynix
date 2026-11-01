@@ -265,6 +265,31 @@ A type may carry a Haskell-style constraint context such as `Functor f =>` or
 (`forall f a b. Functor f => (a -> b) -> f a -> f b`). Contexts are parsed for
 documentation but not enforced, because tynix has no type classes yet.
 
+## Type Ascriptions
+
+```tynix
+(builtins.fromJSON text :: { port :: Int; })
+```
+
+`(e :: T)` checks that `e` has type `T`. Unlike a cast, it never narrows. It
+is erased.
+
+## Macros
+
+```tynix
+macro enum {
+  ( $( $tag:ident ),* ) => ({ $( $tag = stringify!($tag); )* });
+};
+
+enum!(red, green)
+```
+
+A macro is a list of `(pattern) => (template);` rules, declared before the
+root expression and invoked as `name!( ... )`. Expansion is hygienic and every
+template is type-checked at its definition. See the
+[macros tutorial](./tutorial/macros.md) and the
+[reference](./reference/advanced-types.md#macros).
+
 ## Casts
 
 ```tynix
@@ -347,10 +372,25 @@ false
 Int -> Int
 String -> { name :: String; }
 Int %1 -> Int
+String -> String ! { Trace }
+forall a e. (a -> a ! e) -> a -> a ! e
+(String -> String ! { Fetch }) -> String ->{fetch} String ! { Fetch }
+forall a. (n :: Nat) -> a -> Vec n a
 ```
 
-`%1 ->` is the linear arrow, inferred for lambdas that use their argument
-exactly once. It may be used wherever `->` is expected.
+- `%1 ->` is the **linear** arrow: the function consumes its argument exactly
+  once. It is inferred for lambdas that do, and may be used wherever `->` is
+  expected.
+- `! { ... }` after the result lists the **effects** a full application may
+  perform (`Trace`, `Throw`, `Abort`, `Read`, `Fetch`, `Store`, `Impure`).
+  `! {}` means pure, `! e` and `! { Trace | e }` are effect-polymorphic, and an
+  arrow without `!` does not track effects.
+- `->{a, b}` is a **capture set**: the effectful capabilities a closure may
+  hold. `->{}` holds none.
+- `(n :: Nat) -> B` is a **dependent** arrow: `B` may mention `n`, which stands
+  for the argument's precise type at each call.
+
+See [Effects, Linearity & Macros](./reference/advanced-types.md) for the rules.
 
 ### Record Types
 
@@ -402,7 +442,28 @@ forall f a b. Functor f => (a -> b) -> f a -> f b
 ```tynix
 type Box a = { value :: a; };
 type Pair = Tuple [Int String];
+type Fix (f :: Type -> Type) = f (Fix f);
+opaque type StorePath = String;
+opaque type Id t = String;
 ```
+
+A parameter may carry a kind annotation. An `opaque type` is **nominal**: it is
+distinct from every other type, including its representation, and its
+parameters are invariant, so a phantom parameter such as `t` in `Id t` keeps
+`Id User` and `Id Package` apart. Convert with `as` in either direction.
+
+### Type-Level Operators
+
+```tynix
+Get { port :: Int; } "port"   # Int
+KeyOf { a :: Int; b :: Int; } # "a" | "b"
+Length (Vec 3 Int)            # 3
+Add 2 3                       # 5
+```
+
+These reduce once their arguments are known, which is what makes dependent
+signatures such as `builtins.getAttr :: forall r. (k :: String) -> r -> Get r k`
+precise.
 
 ### Higher-Kinded Application
 

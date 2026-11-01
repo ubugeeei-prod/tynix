@@ -68,4 +68,5 @@ sharedPrefixLength left right =
 
 stripCasts :: Expr -> Expr
 stripCasts (ECast expr _) = stripCasts expr
+stripCasts (EAscribe expr _) = stripCasts expr
 stripCasts expr = expr

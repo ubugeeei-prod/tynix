@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+### Added: a much richer type system
+
+- **Effects.** Function types carry the effects a call may perform
+  (`String -> String ! { Trace }`): `Trace`, `Throw`, `Abort`, `Read`, `Fetch`,
+  `Store`, `Impure`. Effects are inferred, generalized as effect variables
+  (`twice :: forall t0 e0. (t0 -> t0 ! e0) -> t0 -> t0 ! e0`), bounded by
+  signatures (`! {}` demands purity, [`TC0023`]), and discharged by
+  `builtins.tryEval`. `flake.tynix` files may not perform `Impure`
+  ([`TC0024`]). The builtins prelude annotates every effectful builtin; arrows
+  written without `!` stay untracked, so existing code is unaffected.
+- **Linear types.** `A %1 -> B` is now enforced precisely: every path must
+  consume the argument exactly once, and closures and unrestricted calls count
+  as many uses ([`TC0026`]). Inferred multiplicities are accurate too, so a
+  curried function's outer arrows are no longer reported as linear.
+- **Capture tracking.** `A ->{fetch} B` bounds the effectful capabilities a
+  closure captures; `->{}` allows none ([`TC0025`]).
+- **Dependent arrows.** `(n :: Nat) -> Vec n a` lets a result depend on an
+  argument's value, with the type-level operators `Get`, `KeyOf`, `Length`,
+  `Add`, `Sub`, and `Mul`. `builtins.getAttr`, `builtins.genList`, and
+  `builtins.length` are now dependent: `builtins.getAttr "port" { port = 80; }`
+  is `80`.
+- **Opaque and phantom types.** `opaque type Id t = String;` declares a nominal,
+  invariant type; `as` converts to and from the representation, and selecting a
+  field of an opaque type is [`TC0027`].
+- **Higher-rank polymorphism.** `forall` may appear in argument positions;
+  such parameters are instantiated at each use and arguments are checked
+  against fresh skolems.
+- **`rec` generalization.** `rec { ... }` fields generalize like `let`
+  bindings.
+- **Kind annotations** on alias parameters: `type Fix (f :: Type -> Type) = ...;`.
+- **Type ascriptions** `(e :: T)`.
+- **Hygienic, declarative, typed macros.** `macro name { (pattern) => (template); };`
+  with `expr`, `ident`, `type`, `string`, and typed (`$x :: T`) fragments,
+  repetitions, and `stringify!`. Template binders are renamed per expansion,
+  free names are pinned to `builtins`, templates are type-checked at their
+  definition, and typed arguments at the call. New diagnostics `TX0001` to
+  `TX0006`.
+
+New tutorial chapters (13 to 16) and a reference page,
+[Effects, Linearity & Macros](https://tynix.dev/reference/advanced-types),
+cover all of it.
+
+[`TC0023`]: https://tynix.dev/diagnostics#tc0023--effect-not-allowed
+[`TC0024`]: https://tynix.dev/diagnostics#tc0024--impure-operation-in-pure-evaluation
+[`TC0025`]: https://tynix.dev/diagnostics#tc0025--closure-captures-a-capability-its-type-does-not-allow
+[`TC0026`]: https://tynix.dev/diagnostics#tc0026--linearity-violation
+[`TC0027`]: https://tynix.dev/diagnostics#tc0027--field-selected-from-an-opaque-type
+
 ## v2.0.0 - 2026-10-05
 
 ### Changed (breaking): tnix is now tynix

@@ -3,10 +3,17 @@
  *
  * The expression half follows nix-community/tree-sitter-nix closely (same node
  * names wherever possible) so Nix-oriented queries keep working. The tynix half
- * adds top-level `type` aliases, `declare` blocks, `name :: Type;` signatures,
- * typed lambda binders `(x :: T): body`, `expr as Type` casts, and a full type
- * sub-language (forall, constraints, arrows, unions, records, conditional
- * types with `infer`, literal types, type lists).
+ * adds top-level `type` / `opaque type` aliases (with optional kind
+ * annotations), `declare` blocks, `macro` declarations and `name!( ... )`
+ * invocations, `name :: Type;` signatures, typed lambda binders
+ * `(x :: T): body`, `expr as Type` casts, `(expr :: Type)` ascriptions, and a
+ * full type sub-language (forall, constraints, arrows with linearity, capture
+ * sets, dependent binders and effect rows, unions, records, conditional types
+ * with `infer`, literal types, type lists).
+ *
+ * Macro patterns and templates are parsed as token trees: they are only
+ * meaningful after expansion, so the grammar just delimits and highlights
+ * them.
  */
 
 /* eslint-disable no-undef */
@@ -58,12 +65,12 @@ module.exports = grammar({
 
   inline: ($) => [$._type_union, $._type_app],
 
-  conflicts: (_) => [],
+  conflicts: ($) => [[$.typed_parameter, $.variable_expression]],
 
   rules: {
     source_code: ($) =>
       seq(
-        repeat(field("declaration", choice($.type_alias, $.ambient_declaration))),
+        repeat(field("declaration", choice($.type_alias, $.ambient_declaration, $.macro_declaration))),
         optional(field("expression", $._expression)),
       ),
 
@@ -72,12 +79,82 @@ module.exports = grammar({
 
     type_alias: ($) =>
       seq(
+        optional(field("modifier", alias("opaque", $.opaque))),
         "type",
         field("name", alias($.identifier, $.type_identifier)),
-        repeat(field("parameter", alias($.identifier, $.type_variable))),
+        repeat(field("parameter", choice(alias($.identifier, $.type_variable), $.kinded_parameter))),
         "=",
         field("type", $._type),
         ";",
+      ),
+
+    // `(f :: Type -> Type)`
+    kinded_parameter: ($) =>
+      seq("(", field("name", alias($.identifier, $.type_variable)), "::", field("kind", $._kind), ")"),
+
+    _kind: ($) => choice($.kind_arrow, $._kind_atom),
+
+    kind_arrow: ($) => prec.right(seq(field("parameter", $._kind_atom), "->", field("result", $._kind))),
+
+    _kind_atom: ($) => choice(alias($.identifier, $.kind), alias("*", $.kind), seq("(", $._kind, ")")),
+
+    // ---------------------------------------------------------------------
+    // Macros
+
+    macro_declaration: ($) =>
+      seq("macro", field("name", $.identifier), "{", repeat(field("rule", $.macro_rule)), "}", ";"),
+
+    macro_rule: ($) =>
+      seq(
+        field("pattern", $.macro_token_tree),
+        "=>",
+        field("template", $.macro_token_tree),
+        ";",
+      ),
+
+    macro_token_tree: ($) => seq("(", repeat($._macro_token), ")"),
+
+    _macro_token: ($) =>
+      choice(
+        $.macro_token_tree,
+        $.macro_repetition,
+        $.metavariable,
+        $.macro_invocation,
+        seq("[", repeat($._macro_token), "]"),
+        seq("{", repeat($._macro_token), "}"),
+        $.string_expression,
+        $.indented_string_expression,
+        $.integer_expression,
+        $.float_expression,
+        $.path_expression,
+        $.identifier,
+        $.macro_punctuation,
+      ),
+
+    // `$( ... ),*`
+    macro_repetition: ($) =>
+      seq("$(", repeat($._macro_token), ")", optional(choice(",", ";")), choice("*", "+", "?")),
+
+    // `$name`, `$name:fragment`
+    metavariable: ($) =>
+      seq(
+        field("name", alias(token(seq("$", /[a-zA-Z_][a-zA-Z0-9_'\-]*/)), $.metavariable_name)),
+        optional(seq(token.immediate(":"), field("fragment", alias(token.immediate(/expr|ident|type|string/), $.fragment)))),
+      ),
+
+    macro_punctuation: (_) => token(prec(-1, /[=<>\-+*\/!&|:.?@%^~,;]+/)),
+
+    // `name!( ... )`
+    macro_invocation: ($) =>
+      prec(
+        1,
+        seq(
+          field("name", $.identifier),
+          token.immediate("!"),
+          token.immediate("("),
+          repeat(field("argument", $._macro_token)),
+          ")",
+        ),
       ),
 
     ambient_declaration: ($) =>
@@ -267,6 +344,7 @@ module.exports = grammar({
         $.hpath_expression,
         $.spath_expression,
         $.uri_expression,
+        $.macro_invocation,
         $.parenthesized_expression,
         $.attrset_expression,
         $.let_attrset_expression,
@@ -334,7 +412,8 @@ module.exports = grammar({
 
     _indented_dollar_escape: (_) => token.immediate(/''\$|''\\\$/),
 
-    parenthesized_expression: ($) => seq("(", field("expression", $._expression), ")"),
+    parenthesized_expression: ($) =>
+      seq("(", field("expression", $._expression), optional(seq("::", field("type", $._type))), ")"),
 
     attrset_expression: ($) => seq("{", optional($.binding_set), "}"),
 
@@ -404,9 +483,35 @@ module.exports = grammar({
       prec.right(
         PREC.type,
         seq(
-          field("parameter", $._type_union),
-          choice("->", seq(alias("%1", $.multiplicity), "->")),
+          field("parameter", choice($._type_union, $.dependent_parameter)),
+          optional(alias("%1", $.multiplicity)),
+          "->",
+          optional(field("captures", $.capture_set)),
           field("result", $._type),
+          optional(field("effects", $.effect_row)),
+        ),
+      ),
+
+    // `(n :: Nat) -> Vec n a`
+    dependent_parameter: ($) =>
+      seq("(", field("name", alias($.identifier, $.type_variable)), "::", field("type", $._type), ")"),
+
+    // `->{fetch, log}`, glued to the arrow.
+    capture_set: ($) =>
+      seq(token.immediate("{"), optional(commaSep1(field("capability", $.identifier))), "}"),
+
+    // `! { Trace, Throw | e }`, `! e`, `! {}`
+    effect_row: ($) =>
+      seq(
+        "!",
+        choice(
+          seq(
+            "{",
+            optional(commaSep1(field("effect", alias($.identifier, $.effect_label)))),
+            optional(seq("|", field("tail", alias($.identifier, $.type_variable)))),
+            "}",
+          ),
+          field("tail", alias($.identifier, $.type_variable)),
         ),
       ),
 

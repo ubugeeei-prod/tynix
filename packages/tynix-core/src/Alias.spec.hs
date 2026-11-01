@@ -72,9 +72,9 @@ spec = do
   describe "expandAliases" $ do
     let env =
           mkAliasEnv
-            [ TypeAlias{typeAliasName = "Id", typeAliasParams = [], typeAliasBody = tInt},
-              TypeAlias{typeAliasName = "Pair", typeAliasParams = ["a", "b"], typeAliasBody = TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")])},
-              TypeAlias{typeAliasName = "Forever", typeAliasParams = [], typeAliasBody = TCon "Forever"}
+            [ plainAlias "Id" [] tInt,
+              plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")])),
+              plainAlias "Forever" [] (TCon "Forever")
             ]
 
     it "leaves unrelated types untouched" $
@@ -97,7 +97,7 @@ spec = do
     it "expands aliases nested far below the old structural budget" $ do
       -- The recursion budget counts expansions, not structural depth, so a
       -- deeply nested type still resolves its aliases all the way down.
-      let env = mkAliasEnv [TypeAlias "Leaf" [] tInt]
+      let env = mkAliasEnv [plainAlias "Leaf" [] tInt]
           nest 0 = TCon "Leaf"
           nest n = TRecord (Map.fromList [("next", nest (n - 1 :: Int))])
           expected 0 = tInt
@@ -197,22 +197,22 @@ instance Arbitrary AliasCase where
 aliasEnvironments :: [AliasEnv]
 aliasEnvironments =
   [ mempty,
-    mkAliasEnv [TypeAlias "Leaf" [] tInt],
+    mkAliasEnv [plainAlias "Leaf" [] tInt],
     mkAliasEnv
-      [ TypeAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
-        TypeAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))
+      [ plainAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
+        plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))
       ],
     mkAliasEnv
-      [ TypeAlias "A" [] (TCon "B"),
-        TypeAlias "B" [] (TCon "C"),
-        TypeAlias "C" [] tString
+      [ plainAlias "A" [] (TCon "B"),
+        plainAlias "B" [] (TCon "C"),
+        plainAlias "C" [] tString
       ],
     mkAliasEnv
-      [ TypeAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a")),
-        TypeAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")]))
+      [ plainAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a")),
+        plainAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")]))
       ],
-    mkAliasEnv [TypeAlias "Loop" [] (TCon "Loop")],
-    mkAliasEnv [TypeAlias "Grow" ["a"] (TApp (TCon "Grow") (TVar "a"))]
+    mkAliasEnv [plainAlias "Loop" [] (TCon "Loop")],
+    mkAliasEnv [plainAlias "Grow" ["a"] (TApp (TCon "Grow") (TVar "a"))]
   ]
 
 genAliasedType :: Int -> Gen Type

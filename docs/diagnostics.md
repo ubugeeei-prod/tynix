@@ -22,6 +22,7 @@ The leading prefix of the code encodes the phase:
 | `TKxxxx` | kind checker |
 | `TCxxxx` | type checker / semantic analysis |
 | `TDxxxx` | driver / project / IO |
+| `TXxxxx` | macro expansion |
 | `TLxxxx` | language-server lints (editor only, see [below](#language-server-lints-tlxxxx)) |
 
 Codes are considered stable once assigned. To retire a code, leave its entry
@@ -236,6 +237,108 @@ statically.
 
 **Fix:** bind a static name, or build an attribute set with the dynamic key
 and select from it.
+
+### `TC0023` — effect not allowed
+
+A function performs an effect its type does not admit: a lambda checked
+against `A -> B ! {}` calls `builtins.trace`, say, or a function whose effects
+are `{ Trace }` is passed where `! {}` is expected. The message names the
+first offending label (`Trace`, `Throw`, `Abort`, `Read`, `Fetch`, `Store`,
+`Impure`) or effect variable.
+
+**Fix:** add the effect to the signature (`! { Trace }`), handle it
+(`builtins.tryEval` discharges `Throw`), or remove the effectful call. An arrow
+written without `! { ... }` does not track effects at all.
+
+### `TC0024` — impure operation in pure evaluation
+
+A `flake.tynix` performs the `Impure` effect: `builtins.getEnv`,
+`builtins.currentTime`, `builtins.currentSystem`, or `builtins.nixPath`. Flakes
+are evaluated in pure mode, where these are unavailable or constant.
+
+**Fix:** take the value as an input (for example `system` from
+`flake-utils`), or move the code out of the flake.
+
+### `TC0025` — closure captures a capability its type does not allow
+
+A lambda checked against an arrow with a capture set (`A ->{fetch} B`, or
+`A ->{} B` for "captures nothing") closes over an effectful function that the
+set does not list.
+
+**Fix:** list the capability in the arrow's capture set, or pass it as an
+argument instead of capturing it.
+
+### `TC0026` — linearity violation
+
+A function checked against a linear arrow (`A %1 -> B`) does not consume its
+argument exactly once: it never uses it, uses it twice, uses it inside a
+closure or as the argument of an unrestricted function, or uses it on only one
+branch of an `if`. Passing an unrestricted function where a linear one is
+expected reports the same code.
+
+**Fix:** consume the binder exactly once on every path, or relax the
+signature to `A -> B`.
+
+### `TC0027` — field selected from an opaque type
+
+A field was selected from a value of an `opaque type`, whose representation is
+hidden.
+
+**Fix:** cast to the representation first (`(secret as { value :: String; }).value`),
+or expose an accessor function.
+
+## Macro expansion (`TXxxxx`)
+
+Macros are expanded while a file is parsed, so these are reported where the
+macro is invoked (or, for `TX0004`, where it is defined).
+
+### `TX0001` — no rule matches
+
+An invocation `name!( ... )` does not match any rule's pattern, or names an
+unknown macro.
+
+**Fix:** check the arguments against the rules, in order: literal tokens must
+appear verbatim and fragments must parse as their kind (`expr`, `ident`,
+`type`, `string`).
+
+### `TX0002` — invalid macro pattern
+
+A macro declaration has no rules, or a pattern uses an unknown fragment
+specifier.
+
+**Fix:** use `$x:expr`, `$x:ident`, `$x:type`, `$x:string`, or `$x :: Type`
+for a typed expression.
+
+### `TX0003` — hygiene violation
+
+A template refers to a name that is not in scope where the macro is defined
+(other than a Nix global), or uses `with` or `rec`, which would bind names the
+caller's arguments could see.
+
+**Fix:** take the value as a parameter (`$lib:expr`), and build attribute sets
+without `rec`.
+
+### `TX0004` — invalid template
+
+A template does not parse after expansion, mixes repetition depths, or does
+not type-check. Every rule's template is checked once, at the definition, with
+its typed parameters at their declared types.
+
+**Fix:** follow the message; for type errors, check the template as you would
+a function body.
+
+### `TX0005` — expansion limit
+
+Macro expansions nested more than 64 levels deep, usually a recursive macro
+without a base case.
+
+**Fix:** add a rule that stops the recursion.
+
+### `TX0006` — metavariable outside a template
+
+A `$name` metavariable appears in ordinary code.
+
+**Fix:** metavariables only have meaning inside a macro template.
 
 ## Driver / Project (`TDxxxx`)
 

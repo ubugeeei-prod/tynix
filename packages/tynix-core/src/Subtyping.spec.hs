@@ -83,8 +83,8 @@ spec = describe "subtyping and type reduction" $ do
   it "reduces generic aliases including HKT-shaped applications" $ do
     let env =
           mkAliasEnv
-            [ TypeAlias "Box" ["T"] (TRecord (Map.fromList [("value", TVar "T")])),
-              TypeAlias "Apply" ["F", "A"] (TApp (TVar "F") (TVar "A"))
+            [ plainAlias "Box" ["T"] (TRecord (Map.fromList [("value", TVar "T")])),
+              plainAlias "Apply" ["F", "A"] (TApp (TVar "F") (TVar "A"))
             ]
     resolveType env (TApp (TCon "Box") tInt)
       `shouldBe` TRecord (Map.fromList [("value", tInt)])
@@ -92,7 +92,7 @@ spec = describe "subtyping and type reduction" $ do
       `shouldBe` tList tString
 
   it "reduces nullary aliases without requiring synthetic arguments" $ do
-    let env = mkAliasEnv [TypeAlias "Inputs" [] (TRecord (Map.fromList [("self", tDynamic)]))]
+    let env = mkAliasEnv [plainAlias "Inputs" [] (TRecord (Map.fromList [("self", tDynamic)]))]
     resolveType env (TCon "Inputs")
       `shouldBe` TRecord (Map.fromList [("self", tDynamic)])
 
@@ -264,11 +264,11 @@ shrinkType = \case
 sampleAliasEnv :: AliasEnv
 sampleAliasEnv =
   mkAliasEnv
-    [ TypeAlias "Leaf" [] tInt,
-      TypeAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
-      TypeAlias "A" [] (TCon "B"),
-      TypeAlias "B" [] tString,
-      TypeAlias "Loop" [] (TCon "Loop")
+    [ plainAlias "Leaf" [] tInt,
+      plainAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
+      plainAlias "A" [] (TCon "B"),
+      plainAlias "B" [] tString,
+      plainAlias "Loop" [] (TCon "Loop")
     ]
 
 -- | Two union member lists drawn from a shared pool, so overlap between them

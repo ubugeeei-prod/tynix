@@ -1,0 +1,21 @@
+# Dependent arrows compute result types from argument values; opaque types are
+# nominal, so phantom parameters keep look-alike strings apart.
+opaque type Id t = String;
+type User = { name :: String; };
+type Compose (f :: Type -> Type) (g :: Type -> Type) a = f (g a);
+
+let
+  replicate :: forall a. (n :: Nat) -> a -> Vec n a;
+  replicate = n: x: builtins.genList (_: x) n;
+
+  userId :: String -> Id User;
+  userId = raw: raw as Id User;
+
+  grid :: Compose List List Int;
+  grid = [ [ 1 2 ] [ 3 ] ];
+in {
+  three = replicate 3 "x";
+  port = builtins.getAttr "port" { port = 8080; host = "localhost"; };
+  ada = userId "ada";
+  inherit grid;
+}

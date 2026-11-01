@@ -45,7 +45,7 @@ import Check qualified
 import Compile
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, displayException, try)
-import Control.Monad (foldM, forM)
+import Control.Monad (foldM, forM, forM_)
 import Data.ByteString qualified as ByteString
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (group, isSuffixOf, nub, sort)
@@ -62,7 +62,7 @@ import Parser
 import Pretty (renderExpr)
 import Syntax
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory, pathIsSymbolicLink)
-import System.FilePath (isAbsolute, joinPath, normalise, replaceExtension, splitDirectories, takeDirectory, (</>))
+import System.FilePath (isAbsolute, joinPath, normalise, replaceExtension, splitDirectories, takeDirectory, takeFileName, (</>))
 import Type
 
 -- | End-to-end analysis result for one file.
@@ -158,7 +158,36 @@ analyzeTextDetailedWith cache path input = do
     localAmbient <- plain (collectAmbient path program)
     let aliases = mkAliasEnv (programAliases program <> worldAliases supportWorld)
         ambient = localAmbient <> worldAmbient supportWorld
-        context = CheckContext{checkAliases = aliases, checkAmbient = ambient, checkFile = path, checkOpenScope = False}
+        context =
+          CheckContext
+            { checkAliases = aliases,
+              checkAmbient = ambient,
+              checkFile = path,
+              checkOpenScope = False,
+              -- Flakes are evaluated in pure mode.
+              checkPureEval = takeFileName path == "flake.tynix"
+            }
+    -- Each macro rule's template is checked once, here, rather than at every
+    -- expansion.
+    forM_ (programMacros located) $ \macro ->
+      forM_ (zip [1 :: Int ..] (macroRules macro)) $ \(index, rule) ->
+        case checkProgramDetailed context (Program [] [] (Just (Marked Nothing (ruleCheck rule))) []) of
+          Right _ -> Right ()
+          Left err ->
+            Left
+              ( AnalysisError
+                  ( withCode
+                      TX0004InvalidTemplate
+                      ( "rule "
+                          <> show index
+                          <> " of macro `"
+                          <> Text.unpack (macroName macro)
+                          <> "` does not type-check: "
+                          <> checkErrorMessage err
+                      )
+                  )
+                  (Just (spanToRange input (macroSpan macro)))
+              )
     result <- case checkProgramDetailed context located of
       Left err -> Left (AnalysisError (checkErrorMessage err) (spanToRange input <$> checkErrorSpan err))
       Right ok -> Right ok

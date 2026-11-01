@@ -37,6 +37,7 @@ eraseExpr expr =
     EList members -> EList (map eraseExpr members)
     EInterp form parts -> EInterp form (map eraseStringPart parts)
     ECast inner _ -> eraseExpr inner
+    EAscribe inner _ -> eraseExpr inner
     ESelectOr base fields fallback -> ESelectOr (eraseExpr base) (map eraseSelectStep fields) (eraseExpr fallback)
     EPathInterp parts -> EPathInterp (map eraseStringPart parts)
     ELoc span' inner -> ELoc span' (eraseExpr inner)

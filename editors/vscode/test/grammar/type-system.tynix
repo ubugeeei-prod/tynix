@@ -1,0 +1,17 @@
+opaque type Id t = String;
+type Compose (f :: Type -> Type) (g :: Type -> Type) a = f (g a);
+
+macro enum {
+  ( $( $tag:ident ),* ) => ({ $( $tag = stringify!($tag); )* });
+};
+
+let
+  log :: String -> String ! { Trace };
+  twice :: forall a e. (a -> a ! e) -> a -> a ! e;
+  mk :: (String -> String ! { Fetch }) -> String ->{fetch} String ! { Fetch };
+  once :: Int %1 -> Int;
+  replicate :: forall a. (n :: Nat) -> a -> Vec n a;
+in {
+  colors = enum!(red, green);
+  port = (builtins.fromJSON "{}" :: { port :: Int; });
+}

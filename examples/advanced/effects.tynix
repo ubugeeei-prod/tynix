@@ -1,0 +1,19 @@
+# Effects: what a call may do besides returning a value.
+let
+  # Inferred: forall t0. t0 -> String ! {Trace}
+  greet = name: builtins.trace "greeting" "Hello, ${name}!";
+
+  # `! {}` promises purity; calling builtins.trace here is rejected.
+  double :: Int -> Int ! {};
+  double = x: x * 2;
+
+  # Effect polymorphism: performs whatever `f` performs.
+  twice :: forall a e. (a -> a ! e) -> a -> a ! e;
+  twice = f: x: f (f x);
+
+  # `tryEval` handles `Throw`, so `attempt` is pure.
+  attempt = (builtins.tryEval (throw "boom")).success;
+in {
+  inherit greet double twice attempt;
+  quadruple = twice double 1;
+}

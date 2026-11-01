@@ -5,13 +5,16 @@
 -- The syntax combines Haskell-like binders (`forall`) with TypeScript-inspired
 -- features (`extends`, `infer`) while keeping the visual shape light enough to
 -- sit next to ordinary Nix code.
-module ParserType (typeParser) where
+module ParserType (kindParser, typeParser) where
 
+import Control.Monad (void)
 import Data.Char (isUpper)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as Text
 import ParserLexer
 import Text.Megaparsec
+import Text.Megaparsec.Char (char, string)
 import Type
 
 -- | Entry point for type parsing.
@@ -51,19 +54,80 @@ conditionalParser = do
     TConditional lhs rhs yesTy <$> typeParser
 
 -- | Parse right-associative function arrows.
+--
+-- An arrow may carry, besides `%1` linearity:
+--
+-- * a dependent binder, `(n :: Nat) -> Vec n a`, naming the argument in the
+--   codomain;
+-- * a capture set written against the arrow, `A ->{fetch} B`;
+-- * a latent effect row after the codomain, `A -> B ! { Trace }`. The row
+--   belongs to the innermost arrow it follows, so in `a -> b -> c ! { E }`
+--   only the full application performs `E`.
 functionParser :: Parser Type
-functionParser = do
-  lhs <- unionParser
-  option lhs $ do
-    mult <- arrowMultiplicityParser
-    TFun mult lhs <$> functionParser
+functionParser = fst <$> functionChain
 
-arrowMultiplicityParser :: Parser Multiplicity
-arrowMultiplicityParser =
-  choice
-    [ One <$ try (symbol "%1" *> symbol "->"),
-      Many <$ symbol "->"
-    ]
+-- | Parse a function type, reporting whether the result is an unparenthesized
+-- arrow (whose own effect suffix has then already been parsed).
+functionChain :: Parser (Type, Bool)
+functionChain = do
+  binder <- optional (try dependentBinder)
+  case binder of
+    Just (name, domain) -> (,True) <$> arrowTail (Just name) domain
+    Nothing -> do
+      lhs <- unionParser
+      option (lhs, False) ((,True) <$> arrowTail Nothing lhs)
+  where
+    dependentBinder = do
+      (name, domain) <- parens ((,) <$> typeIdentifier <* symbol "::" <*> typeParser)
+      _ <- lookAhead (void (try (symbol "%1")) <|> void (string "->"))
+      pure (name, domain)
+    arrowTail binder domain = do
+      (mult, captures) <- arrowParser
+      (codomain, nested) <- functionChain
+      effects <- if nested then pure Nothing else optional (try effectSuffix)
+      pure
+        ( TArrow
+            Arrow
+              { arrowMult = mult,
+                arrowEffects = fromMaybe TDynamic effects,
+                arrowCaptures = captures,
+                arrowBinder = binder
+              }
+            domain
+            codomain
+        )
+
+-- | Parse `->`, `%1 ->`, and an optional capture set glued to the arrow
+-- (`->{a, b}`; `->{}` is a closure that captures nothing tracked).
+arrowParser :: Parser (Multiplicity, Maybe [Name])
+arrowParser = do
+  mult <- option Many (One <$ try (symbol "%1" <* lookAhead (string "->")))
+  captures <- lexeme $ do
+    _ <- string "->"
+    optional (try captureSet)
+  pure (mult, captures)
+  where
+    captureSet = char '{' *> sc *> sepBy identifier (symbol ",") <* char '}'
+
+-- | Parse an effect suffix: `! { Trace, Throw }`, `! { Trace | e }`, `! e`,
+-- or `! {}` for a pure function.
+effectSuffix :: Parser Type
+effectSuffix = do
+  _ <- lexeme (char '!' <* notFollowedBy (char '='))
+  braces row <|> (TVar <$> typeIdentifier)
+  where
+    row = do
+      labels <- sepBy typeIdentifier (symbol ",")
+      tail' <- optional (symbol "|" *> typeIdentifier)
+      pure (effectRow labels (TVar <$> tail'))
+
+-- | Parse a kind: `Type`, `*`, or arrows between kinds.
+kindParser :: Parser Kind
+kindParser = do
+  lhs <- atom
+  option lhs (KFun lhs <$> (symbol "->" *> kindParser))
+  where
+    atom = (KType <$ (reserved "Type" <|> void (symbol "*"))) <|> parens kindParser
 
 -- | Parse normalized unions.
 unionParser :: Parser Type

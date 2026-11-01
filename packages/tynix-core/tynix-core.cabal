@@ -22,6 +22,7 @@ library
     , Emit
     , Indexed
     , Kind
+    , Macro
     , Parser
     , ParserExpr
     , ParserLexer
@@ -58,6 +59,7 @@ common spec-defaults
     , Emit
     , Indexed
     , Kind
+    , Macro
     , Parser
     , ParserExpr
     , ParserLexer
@@ -146,6 +148,11 @@ test-suite tynix-check-spec
   import: spec-defaults
   type: exitcode-stdio-1.0
   main-is: Check.spec.hs
+
+test-suite tynix-type-system-spec
+  import: spec-defaults
+  type: exitcode-stdio-1.0
+  main-is: TypeSystem.spec.hs
 
 source-repository head
   type: git

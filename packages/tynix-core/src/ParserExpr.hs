@@ -13,12 +13,18 @@
 -- checker can report span-accurate diagnostics.
 module ParserExpr (expressionParser, programParser) where
 
-import Control.Monad (void)
-import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
-import Data.Either (lefts, rights)
+import Control.Monad (void, when)
+import Control.Monad.Reader (ask, asks, local, runReaderT)
+import Data.Char (isAlphaNum, isAsciiLower, isAsciiUpper, isDigit, isLetter)
+import Data.Either (lefts)
 import Data.Functor (($>))
-import Data.Maybe (fromMaybe, isJust)
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe, isJust, maybeToList)
 import Data.Text qualified as Text
+import Diagnostics (DiagnosticCode (..), withCode)
+import Macro
 import ParserLexer
 import ParserType
 import Syntax
@@ -27,31 +33,68 @@ import Text.Megaparsec.Char (char, string)
 import Type
 
 -- | Parse a full tynix source file.
+--
+-- Declarations come first. A macro is in scope from its declaration on, for
+-- later declarations and the root expression alike.
 programParser :: Parser Program
-programParser = do
-  decls <- many declarationParser
-  expr <- optional (markCurrent expressionParser)
-  pure
-    Program
-      { programAliases = lefts decls,
-        programAmbient = rights decls,
-        programExpr = expr
-      }
+programParser = go [] [] []
+  where
+    go aliases ambient macros = do
+      decl <- optional declarationParser
+      case decl of
+        Just (DeclAlias alias) -> go (alias : aliases) ambient macros
+        Just (DeclAmbient amb) -> go aliases (amb : ambient) macros
+        Just (DeclMacro macro) ->
+          local
+            (\env -> env{envMacros = Map.insert (macroName macro) macro (envMacros env)})
+            (go aliases ambient (macro : macros))
+        Nothing -> do
+          expr <- optional (markCurrent expressionParser)
+          pure
+            Program
+              { programAliases = reverse aliases,
+                programAmbient = reverse ambient,
+                programExpr = expr,
+                programMacros = reverse macros
+              }
 
--- | Parse either a type alias or an ambient declaration.
-declarationParser :: Parser (Either TypeAlias AmbientDecl)
-declarationParser = try (Left <$> aliasParser) <|> (Right <$> try ambientParser)
+data Declaration
+  = DeclAlias TypeAlias
+  | DeclAmbient AmbientDecl
+  | DeclMacro MacroDef
+
+-- | Parse a type alias, an ambient declaration, or a macro.
+declarationParser :: Parser Declaration
+declarationParser =
+  try (DeclAlias <$> aliasParser)
+    <|> (DeclAmbient <$> try ambientParser)
+    <|> (DeclMacro <$> macroParser)
 
 -- | Parse a top-level `type` alias declaration.
+--
+-- `opaque type Id t = String;` declares a nominal type, and a parameter may
+-- carry a kind annotation: `type Fix (f :: Type -> Type) = ...;`.
 aliasParser :: Parser TypeAlias
 aliasParser = do
+  opaque <- option False (True <$ reserved "opaque")
   reserved "type"
   name <- typeIdentifier
-  params <- many typeIdentifier
+  params <- many param
   _ <- symbol "="
   body <- typeParser
   _ <- symbol ";"
-  pure TypeAlias{typeAliasName = name, typeAliasParams = params, typeAliasBody = body}
+  pure
+    TypeAlias
+      { typeAliasName = name,
+        typeAliasParams = map fst params,
+        typeAliasBody = body,
+        typeAliasOpaque = opaque,
+        typeAliasParamKinds = map snd params
+      }
+  where
+    param =
+      ((,Nothing) <$> typeIdentifier)
+        <|> parens ((\p k -> (p, Just k)) <$> typeIdentifier <* symbol "::" <*> kindParser)
 
 -- | Parse a `declare` block that describes an existing `.nix` module.
 ambientParser :: Parser AmbientDecl
@@ -327,7 +370,8 @@ atomParser :: Parser Expr
 atomParser =
   located $
     choice
-      [ parens expressionParser,
+      [ macroInvocation,
+        parens ascribed,
         recAttrSetParser,
         attrSetParser,
         listParser,
@@ -343,6 +387,238 @@ atomParser =
         EVar <$> identifier,
         EVar <$> asVariable
       ]
+
+-- | A parenthesized expression, optionally ascribed a type: `(e :: T)`.
+ascribed :: Parser Expr
+ascribed = do
+  expr <- expressionParser
+  maybe expr (EAscribe expr) <$> optional (symbol "::" *> typeParser)
+
+-- * Macros
+
+-- | Maximum nesting of macro expansions (a recursive macro that never stops).
+expansionLimit :: Int
+expansionLimit = 64
+
+-- | Parse `macro name { (pattern) => (template); ... };`.
+macroParser :: Parser MacroDef
+macroParser = do
+  start <- getOffset
+  name <- try (reserved "macro" *> identifier <* lookAhead (symbol "{"))
+  rawRules <- braces (many ruleParser)
+  _ <- symbol ";"
+  end <- getOffset
+  when (null rawRules) $ failAt start (withCode TX0002InvalidMacroPattern ("macro `" <> Text.unpack name <> "` has no rules"))
+  let defSpan = SrcSpan start end
+      draft = MacroDef{macroName = name, macroRules = [], macroSpan = defSpan}
+  -- The template is checked with the macro itself in scope, so a rule may
+  -- invoke its own macro (nested invocations stay unexpanded while checking).
+  rules <-
+    local (\env -> env{envMacros = Map.insert name draft (envMacros env)}) $
+      traverse (\(pattern', template, offset) -> MacroRule pattern' template offset <$> checkInstance defSpan pattern' template offset) rawRules
+  pure draft{macroRules = rules}
+  where
+    ruleParser = do
+      pattern' <- symbol "(" *> many patternToken <* symbol ")"
+      _ <- symbol "=>"
+      (template, offset) <- templateGroup
+      _ <- symbol ";"
+      pure (pattern', template, offset)
+
+-- | The definition-time instance of a rule: its template with every
+-- metavariable symbolic, closed into a lambda for the checker.
+checkInstance :: SrcSpan -> [MacroToken] -> Text.Text -> Int -> Parser Expr
+checkInstance defSpan pattern' template offset = do
+  (text, leaves) <- either (failAt offset) pure (instantiateTemplate (symbolicBindings pattern') template)
+  env <- ask
+  instance' <- subParse env{envCheckingTemplate = True} text
+  hygienic <- either (failAt offset) pure (hygienize "'def" (relocate defSpan instance'))
+  closeTemplate leaves <$> either (failAt offset) pure (substitute leaves hygienic)
+
+-- | One pattern element.
+patternToken :: Parser MacroToken
+patternToken =
+  choice
+    [ repetition,
+      metavariable,
+      group "(" ")",
+      group "[" "]",
+      group "{" "}",
+      MLiteral <$> lexeme (Text.pack <$> some (satisfy wordChar)),
+      MLiteral . Text.singleton <$> lexeme (oneOf (",;" :: String)),
+      MLiteral . Text.pack <$> lexeme (some (oneOf ("=<>-+*/!&|:.?@%^~" :: String)))
+    ]
+  where
+    wordChar c = isAlphaNum c || c `elem` ("_'" :: String)
+    group open close = do
+      _ <- symbol open
+      items <- many patternToken
+      _ <- symbol close
+      pure (MGroup open items close)
+    repetition = do
+      _ <- try (string "$(") <* sc
+      items <- many patternToken
+      _ <- symbol ")"
+      separator <- optional (try (lexeme (oneOf (",;" :: String)) <* lookAhead (oneOf ("*+?" :: String))))
+      kind <- lexeme ((ZeroOrMore <$ char '*') <|> (OneOrMore <$ char '+') <|> (ZeroOrOne <$ char '?'))
+      pure (MRepeat items (Text.singleton <$> separator) kind)
+    metavariable = do
+      start <- getOffset
+      name <- try (lookAhead (char '$') *> identifier)
+      fragment <-
+        (FragExpr . Just <$> (symbol "::" *> typeParser))
+          <|> (char ':' *> fragmentKind start)
+      pure (MVar (Text.drop 1 name) fragment)
+    fragmentKind start = do
+      kind <- lexeme (some (satisfy isLetter))
+      case kind of
+        "expr" -> pure (FragExpr Nothing)
+        "ident" -> pure FragIdent
+        "type" -> pure FragType
+        "string" -> pure FragString
+        other -> failAt start (withCode TX0002InvalidMacroPattern ("unknown fragment `" <> other <> "`: use expr, ident, type, or string (or `$x :: Type` for a typed expression)"))
+
+-- | A parenthesized template, captured as raw text (with its offset) so its
+-- repetitions can be expanded before it is parsed.
+templateGroup :: Parser (Text.Text, Int)
+templateGroup = do
+  _ <- char '('
+  offset <- getOffset
+  body <- balancedText
+  _ <- char ')'
+  sc
+  pure (Text.pack body, offset)
+
+-- | Text up to the next unmatched closing bracket, skipping over strings.
+balancedText :: Parser String
+balancedText = concat <$> many piece
+  where
+    piece =
+      choice
+        [ quoted,
+          indented,
+          nested '(' ')',
+          nested '[' ']',
+          nested '{' '}',
+          pure <$> satisfy (`notElem` ("()[]{}\"" :: String))
+        ]
+    nested open close = do
+      _ <- char open
+      inner <- balancedText
+      _ <- char close
+      pure (open : inner <> [close])
+    quoted = do
+      _ <- char '"'
+      body <- many ((\a b -> [a, b]) <$> char '\\' <*> anySingle <|> pure <$> satisfy (/= '"'))
+      _ <- char '"'
+      pure ('"' : concat body <> "\"")
+    indented = do
+      _ <- try (string "''")
+      body <- manyTill anySingle (try (string "''" <* notFollowedBy (oneOf ("'$\\" :: String))))
+      pure ("''" <> body <> "''")
+
+-- | Parse a macro invocation `name!( ... )`, expanding it in place.
+--
+-- Only a declared macro (or the built-in `stringify!`) is an invocation, and
+-- only when `!(` follows the name immediately; anything else keeps its Nix
+-- meaning (`f !(x)` is an application of `f` to a negation).
+macroInvocation :: Parser Expr
+macroInvocation = do
+  start <- getOffset
+  macros <- asks envMacros
+  name <-
+    try $ do
+      raw <- Text.pack <$> some (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))
+      _ <- char '!'
+      _ <- lookAhead (char '(')
+      if raw == "stringify" || Map.member raw macros then pure raw else fail "not a macro"
+  _ <- symbol "("
+  if name == "stringify"
+    then stringifyInvocation
+    else do
+      checking <- asks envCheckingTemplate
+      if checking
+        then do
+          _ <- balancedText
+          _ <- symbol ")"
+          pure (EVar "$nested")
+        else case Map.lookup name macros of
+          Nothing -> fail (withCode TX0001NoMatchingRule ("unknown macro `" <> Text.unpack name <> "`"))
+          Just macro -> expandInvocation start macro
+
+stringifyInvocation :: Parser Expr
+stringifyInvocation = do
+  arg <- expressionParser
+  _ <- symbol ")"
+  pure $ case stripLocations arg of
+    EVar name | not (isPlaceholder name) -> EString (DoubleQuoted name)
+    _ -> EApp (EVar "$stringify") arg
+
+-- | Match the invocation against each rule in order and expand the first
+-- that matches the whole argument list.
+expandInvocation :: Int -> MacroDef -> Parser Expr
+expandInvocation start macro = do
+  depth <- asks envExpansionDepth
+  when (depth >= expansionLimit) $
+    fail (withCode TX0005ExpansionLimit ("macro `" <> Text.unpack (macroName macro) <> "` expanded more than " <> show expansionLimit <> " levels deep; is it recursive without a base case?"))
+  matched <- optional (choice [try ((,) rule <$> matchTokens (rulePattern rule) <* symbol ")") | rule <- macroRules macro])
+  case matched of
+    Nothing ->
+      fail (withCode TX0001NoMatchingRule ("no rule of macro `" <> Text.unpack (macroName macro) <> "` matches this invocation"))
+    Just (rule, bindings) -> do
+      end <- getOffset
+      let invocationSpan = SrcSpan start end
+          suffix = "'" <> Text.pack (show (depth + 1)) <> "_" <> Text.pack (show start)
+      (text, leaves) <- either fail pure (instantiateTemplate bindings (ruleTemplate rule))
+      env <- ask
+      instance' <- subParse env{envExpansionDepth = depth + 1} text
+      hygienic <- either fail pure (hygienize suffix (relocate invocationSpan instance'))
+      expanded <- either fail pure (substitute leaves hygienic)
+      pure (ELoc invocationSpan expanded)
+
+-- | Parse a template instance with the ordinary expression grammar.
+subParse :: ParseEnv -> Text.Text -> Parser Expr
+subParse env text =
+  case runParser (runReaderT (sc *> expressionParser <* eof) env) "macro" text of
+    Right expr -> pure expr
+    Left bundle ->
+      let first :| _ = bundleErrors bundle
+          message = Text.unpack (Text.strip (Text.pack (parseErrorTextPretty first)))
+       in fail $
+            if "[TX" `Text.isPrefixOf` Text.pack message
+              then message
+              else withCode TX0004InvalidTemplate ("macro expansion does not parse: " <> message)
+
+-- | Match pattern tokens against invocation input.
+matchTokens :: [MacroToken] -> Parser (Map Name Binding)
+matchTokens items = Map.unions <$> traverse matchToken items
+  where
+    matchToken = \case
+      MLiteral literal
+        | Text.all (\c -> isAlphaNum c || c `elem` ("_'" :: String)) literal ->
+            Map.empty <$ lexeme (try (string literal <* notFollowedBy (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))))
+        | otherwise -> Map.empty <$ try (symbol literal)
+      MVar name fragment -> Map.singleton name . Single <$> matchFragment fragment
+      MGroup open inner close -> symbol open *> matchTokens inner <* symbol close
+      MRepeat inner separator kind -> do
+        let element = try (matchTokens inner)
+            next = maybe element (\sep -> try (symbol sep *> matchTokens inner)) separator
+        results <- case kind of
+          ZeroOrOne -> maybeToList <$> optional element
+          ZeroOrMore -> optional element >>= maybe (pure []) (\first -> (first :) <$> many next)
+          OneOrMore -> element >>= \first -> (first :) <$> many next
+        pure (Map.fromList [(name, Repeated [binding | result <- results, Just binding <- [Map.lookup name result]]) | (name, _, _) <- tokenVars inner])
+    matchFragment = \case
+      FragExpr ty -> (`LExpr` ty) <$> expressionParser
+      FragIdent -> LIdent <$> bindingIdentifier
+      FragType -> LType <$> typeParser
+      FragString -> LStr <$> stringLiteral
+
+-- | Fail with a message reported at the given offset (used for errors in a
+-- macro definition; invocation errors are reported where parsing stopped, so
+-- they win over the errors of alternatives that backtracked earlier).
+failAt :: Int -> String -> Parser a
+failAt offset message = setOffset offset *> fail message
 
 -- | Parse an attribute set.
 attrSetParser :: Parser Expr

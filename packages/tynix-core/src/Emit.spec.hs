@@ -21,6 +21,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (EAttrSet []))
               }
           scheme =
@@ -39,6 +40,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (EInt 1))
               }
           scheme = Scheme [] tInt
@@ -50,6 +52,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (ELambda (PVar "x" Nothing) (EVar "x")))
               }
           scheme = Scheme ["a"] (TFun Many (TVar "a") (TVar "a"))
@@ -60,13 +63,9 @@ spec = do
       let program =
             Program
               { programAliases =
-                  [ TypeAlias
-                      { typeAliasName = "Pair",
-                        typeAliasParams = ["a", "b"],
-                        typeAliasBody = TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")])
-                      }
-                  ],
+                  [plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (EInt 1))
               }
           scheme = Scheme [] tInt
@@ -80,6 +79,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (EAttrSet []))
               }
           scheme = Scheme [] (TRecord (Map.fromList [("value", tInt)]))
@@ -91,6 +91,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (EInt 1))
               }
           scheme = Scheme [] tInt
@@ -102,6 +103,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr = Just (markedExpr (ECast (EAttrSet []) tInt))
               }
           scheme = Scheme [] (TRecord (Map.fromList [("value", tString)]))

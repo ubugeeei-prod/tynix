@@ -26,12 +26,16 @@
 -- useful facts alive for later phases.
 module Subtyping
   ( attrsOfView,
+    capturesWithin,
+    effectsWithin,
+    eraseBinder,
     foldRight1,
     isConsistent,
     isSubtype,
     joinTypes,
     lookupRecordField,
     recordView,
+    reduceOperators,
     resolveHead,
     resolveType,
     unOptional,
@@ -82,12 +86,14 @@ resolveType env = go 0 . prepare . eraseForall
       | otherwise =
           case ty of
             TTypeList items -> TTypeList (map (go depth) items)
-            TFun mult a b -> TFun mult (go depth a) (go depth b)
+            TArrow arrow a b -> TArrow arrow (go depth a) (go depth b)
             TRecord fields -> TRecord (fmap (go depth) fields)
             TOpenRecord fields tail' -> mkOpenRecord (fmap (go depth) fields) (go depth tail')
             TOptional inner -> TOptional (go depth inner)
             TUnion members -> flattenUnion (TUnion (map (go depth) members))
-            TApp f x -> TApp (go depth f) (go depth x)
+            TApp f x ->
+              let app = TApp (go depth f) (go depth x)
+               in maybe app (go (depth + 1) . prepare) (reduceTypeOperator env app)
             TForall vars body -> TForall vars (go depth body)
             TConditional a b c d ->
               case matchPattern (go (depth + 1) a) (go (depth + 1) b) of
@@ -120,8 +126,151 @@ resolveHead env = go 0
                       | isSubtype env a b -> go (depth + 1) c
                       | otherwise -> go (depth + 1) d
             TUnion members -> flattenUnion (TUnion (map (go depth) members))
-            app@(TApp _ _) -> normalizeIndexedType app
+            app@(TApp _ _)
+              | Just reduced <- reduceTypeOperator env app -> go (depth + 1) reduced
+              | otherwise -> normalizeIndexedType app
             other -> other
+
+-- | Reduce a built-in type-level operator applied to known arguments.
+--
+-- These are the computations dependent signatures rely on once a singleton
+-- argument has been substituted into the codomain:
+--
+-- * @Get r k@ — the type of field @k@ (a string literal, or a union of them)
+--   in record @r@, like TypeScript's indexed access @r[k]@;
+-- * @KeyOf r@ — the union of a closed record's field names;
+-- * @Add@ / @Sub@ / @Mul@ — arithmetic on integer literals;
+-- * @Length xs@ — the length of an exact sequence (@Vec n a@, a tuple).
+--
+-- An operator whose arguments are not known enough stays unreduced; one whose
+-- arguments are known but too wide degrades to the widest sensible answer
+-- (@Add Int Int@ is @Int@).
+reduceTypeOperator :: AliasEnv -> Type -> Maybe Type
+reduceTypeOperator env ty =
+  case collectApps ty of
+    (TCon "Get", [recordTy, keyTy]) -> do
+      let record' = resolveHead env recordTy
+          key' = resolveHead env keyTy
+      if record' == tDynamic || record' == tAny
+        then Just record'
+        else case stringKeys key' of
+          Just keys -> do
+            fieldTys <- traverse (lookupRecordField env record') keys
+            case fieldTys of
+              x : xs -> Just (foldRight1 (joinTypes env) x xs)
+              [] -> Nothing
+          Nothing
+            | symbolic key' -> Nothing
+            -- A known but wide key (`String`) may name any field: a
+            -- dictionary's value type, the join of a closed record's
+            -- fields, or `dynamic` when the fields are not all known.
+            | Just valueTy <- attrsOfView record' -> Just valueTy
+            | TRecord fields <- record',
+              x : xs <- map unOptional (Map.elems fields) ->
+                Just (foldRight1 (joinTypes env) x xs)
+            | isSubtype env key' tString -> Just tDynamic
+            | otherwise -> Nothing
+    (TCon "KeyOf", [recordTy]) ->
+      case resolveHead env recordTy of
+        TRecord fields -> Just (unionOf [TLit (LString name) | name <- Map.keys fields])
+        TOpenRecord _ _ -> Just tString
+        resolved | isJust (attrsOfView resolved) -> Just tString
+        _ -> Nothing
+    (TCon op, [a, b])
+      | Just apply <- lookup op arithmetic ->
+          case (resolveHead env a, resolveHead env b) of
+            (TLit (LInt x), TLit (LInt y)) -> Just (TLit (LInt (apply x y)))
+            (a', b')
+              | symbolic a' || symbolic b' -> Nothing
+              | isSubtype env a' tInt && isSubtype env b' tInt -> Just (if op == "Sub" || not (isSubtype env a' tNat && isSubtype env b' tNat) then tInt else tNat)
+              | otherwise -> Just tNumber
+    (TCon "Length", [seqTy]) ->
+      let seq' = normalizeIndexedType (resolveHead env seqTy)
+       in case (tensorView seq', tupleView seq') of
+            (Just (lenTy : _, _), _) -> Just lenTy
+            (_, Just items) -> Just (TLit (LInt (fromIntegral (length items))))
+            _ | isJust (listView seq') || isListApp seq' -> Just tNat
+            _ -> Nothing
+    _ -> Nothing
+  where
+    arithmetic = [("Add", (+)), ("Sub", (-)), ("Mul", (*))]
+    stringKeys = \case
+      TLit (LString name) -> Just [name]
+      TUnion members -> concat <$> traverse stringKeys members
+      _ -> Nothing
+    unionOf = \case
+      [single] -> single
+      members -> TUnion members
+    symbolic = \case
+      TVar _ -> True
+      TMeta _ -> True
+      TSingleton _ _ -> True
+      TApp _ _ -> True
+      _ -> False
+    isListApp = \case
+      TApp (TCon "List") _ -> True
+      _ -> False
+
+-- | Reduce every built-in type-level operator in a type whose arguments are
+-- known, bottom-up. Used on the codomain of a dependent arrow right after its
+-- binder has been instantiated, so results display reduced (`Vec 3 String`,
+-- not `Vec (Add 1 2) String`).
+reduceOperators :: AliasEnv -> Type -> Type
+reduceOperators env = go
+  where
+    go = \case
+      TApp f x ->
+        let app = TApp (go f) (go x)
+         in maybe app go (reduceTypeOperator env app)
+      TArrow arrow a b -> TArrow arrow (go a) (go b)
+      TTypeList items -> TTypeList (map go items)
+      TRecord fields -> TRecord (fmap go fields)
+      TOpenRecord fields tail' -> mkOpenRecord (fmap go fields) (go tail')
+      TOptional inner -> TOptional (go inner)
+      TUnion members -> flattenUnion (TUnion (map go members))
+      other -> other
+
+-- | Erase an arrow's dependency: the binder, if any, is replaced in the
+-- codomain by @replacement@ (usually the domain, or a shared singleton).
+eraseBinder :: Arrow -> Type -> Type -> Type
+eraseBinder arrow replacement cod =
+  case arrowBinder arrow of
+    Just name -> substituteTypeVars (Map.singleton name replacement) cod
+    Nothing -> cod
+
+-- | Whether an actual latent effect row fits an expected one.
+--
+-- Untracked rows ('TDynamic') fit anything in either direction, which is what
+-- keeps unannotated code gradual. Otherwise every actual label must be listed
+-- by the expectation (or absorbed by an unknown tail), and an actual effect
+-- variable must be the expectation's own variable.
+effectsWithin :: Type -> Type -> Bool
+effectsWithin actual expected
+  | actual == TDynamic || expected == TDynamic = True
+  | otherwise =
+      let (actualLabels, actualTail) = rowParts actual
+          (expectedLabels, expectedTail) = rowParts expected
+          absorbs = case expectedTail of
+            Just (TMeta _) -> True
+            Just TDynamic -> True
+            _ -> False
+          labelsOk = absorbs || all (`elem` expectedLabels) actualLabels
+          tailOk = case actualTail of
+            Nothing -> True
+            Just (TMeta _) -> True
+            Just t -> absorbs || expectedTail == Just t
+       in labelsOk && tailOk
+  where
+    rowParts = \case
+      TRecord fields -> (Map.keys fields, Nothing)
+      TOpenRecord fields tail' -> (Map.keys fields, Just tail')
+      other -> ([], Just other)
+
+-- | Whether a closure's captured capabilities fit an expected capture set.
+-- An untracked set on either side is the gradual case and always fits.
+capturesWithin :: Maybe [Name] -> Maybe [Name] -> Bool
+capturesWithin (Just actual) (Just expected) = all (`elem` expected) actual
+capturesWithin _ _ = True
 
 -- | Maximum number of chained conditional-type reductions.
 --
@@ -335,6 +484,7 @@ isSubtype env = go
     -- are only expanded as far as the comparison actually looks.
     go a b = step (resolveHead env a) (resolveHead env b)
     step a b | a == b = True
+    step (TSingleton _ base) b = go base b
     step _ ty | ty == tAny = True
     step _ ty | ty == tDynamic = True
     step ty _ | ty == tAny = True
@@ -396,8 +546,23 @@ isSubtype env = go
             && (shapeDefinitelyEmpty leftShape || go leftElem rightElem)
       | Just leftList <- tensorListView a =
           go leftList b
-    step (TFun leftMult a b) (TFun rightMult c d) =
-      multiplicitySubtype leftMult rightMult && go c a && go b d
+    step (TArrow leftArrow a b) (TArrow rightArrow c d) =
+      let shared = TSingleton "it" c
+       in multiplicitySubtype (arrowMult leftArrow) (arrowMult rightArrow)
+            && effectsWithin (arrowEffects leftArrow) (arrowEffects rightArrow)
+            && capturesWithin (arrowCaptures leftArrow) (arrowCaptures rightArrow)
+            && go c a
+            && go (eraseBinder leftArrow shared b) (eraseBinder rightArrow shared d)
+    -- An opaque type is nominal and invariant in its parameters: phantom
+    -- parameters must agree exactly.
+    step a b
+      | isOpaqueHead env a || isOpaqueHead env b =
+          case (collectApps a, collectApps b) of
+            ((TCon left, leftArgs), (TCon right, rightArgs)) ->
+              left == right
+                && length leftArgs == length rightArgs
+                && and (zipWith (\x y -> go x y && go y x) leftArgs rightArgs)
+            _ -> False
     step a b
       | Just (fields, actualTail) <- recordView a,
         Just (expected, _) <- recordView b =

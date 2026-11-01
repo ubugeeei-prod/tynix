@@ -1,0 +1,212 @@
+================================================================================
+Opaque types and kind annotations
+================================================================================
+
+opaque type Id t = String;
+type Compose (f :: Type -> Type) (g :: *) a = f (g a);
+1
+
+--------------------------------------------------------------------------------
+
+(source_code
+  (type_alias
+    (opaque)
+    (type_identifier)
+    (type_variable)
+    (type_identifier))
+  (type_alias
+    (type_identifier)
+    (kinded_parameter
+      (type_variable)
+      (kind_arrow
+        (kind)
+        (kind)))
+    (kinded_parameter
+      (type_variable)
+      (kind))
+    (type_variable)
+    (type_application
+      (type_identifier)
+      (parenthesized_type
+        (type_application
+          (type_identifier)
+          (type_identifier)))))
+  (integer_expression))
+
+================================================================================
+Effects, captures, linearity and dependent arrows
+================================================================================
+
+let
+  log :: String -> String ! { Trace };
+  twice :: forall a e. (a -> a ! e) -> a -> a ! e;
+  pure :: Int -> Int ! {};
+  open :: Int -> Int ! { Read | e };
+  mk :: (String -> String ! { Fetch }) -> String ->{fetch} String;
+  once :: Int %1 -> Int;
+  replicate :: forall a. (n :: Nat) -> a -> Vec n a;
+in log
+
+--------------------------------------------------------------------------------
+
+(source_code
+  (let_expression
+    (binding_set
+      (type_signature
+        (identifier)
+        (function_type
+          (type_identifier)
+          (type_identifier)
+          (effect_row
+            (effect_label))))
+      (type_signature
+        (identifier)
+        (forall_type
+          (type_variable)
+          (type_variable)
+          (function_type
+            (parenthesized_type
+              (function_type
+                (type_identifier)
+                (type_identifier)
+                (effect_row
+                  (type_variable))))
+            (function_type
+              (type_identifier)
+              (type_identifier)
+              (effect_row
+                (type_variable))))))
+      (type_signature
+        (identifier)
+        (function_type
+          (type_identifier)
+          (type_identifier)
+          (effect_row)))
+      (type_signature
+        (identifier)
+        (function_type
+          (type_identifier)
+          (type_identifier)
+          (effect_row
+            (effect_label)
+            (type_variable))))
+      (type_signature
+        (identifier)
+        (function_type
+          (parenthesized_type
+            (function_type
+              (type_identifier)
+              (type_identifier)
+              (effect_row
+                (effect_label))))
+          (function_type
+            (type_identifier)
+            (capture_set
+              (identifier))
+            (type_identifier))))
+      (type_signature
+        (identifier)
+        (function_type
+          (type_identifier)
+          (multiplicity)
+          (type_identifier)))
+      (type_signature
+        (identifier)
+        (forall_type
+          (type_variable)
+          (function_type
+            (dependent_parameter
+              (type_variable)
+              (type_identifier))
+            (function_type
+              (type_identifier)
+              (type_application
+                (type_identifier)
+                (type_identifier)
+                (type_identifier)))))))
+    (variable_expression
+      (identifier))))
+
+================================================================================
+Ascriptions
+================================================================================
+
+(builtins.fromJSON text :: { port :: Int; })
+
+--------------------------------------------------------------------------------
+
+(source_code
+  (parenthesized_expression
+    (apply_expression
+      (select_expression
+        (variable_expression
+          (identifier))
+        (attrpath
+          (identifier)))
+      (variable_expression
+        (identifier)))
+    (record_type
+      (type_signature
+        (identifier)
+        (type_identifier)))))
+
+================================================================================
+Macro declarations and invocations
+================================================================================
+
+macro enum {
+  ( $( $tag:ident ),* ) => ({ $( $tag = stringify!($tag); )* });
+  ($cond :: Bool, $body:expr) => (if $cond then null else $body);
+};
+{ colors = enum!(red, green); }
+
+--------------------------------------------------------------------------------
+
+(source_code
+  (macro_declaration
+    (identifier)
+    (macro_rule
+      (macro_token_tree
+        (macro_repetition
+          (metavariable
+            (metavariable_name)
+            (fragment))))
+      (macro_token_tree
+        (macro_repetition
+          (metavariable
+            (metavariable_name))
+          (macro_punctuation)
+          (macro_invocation
+            (identifier)
+            (metavariable
+              (metavariable_name)))
+          (macro_punctuation))))
+    (macro_rule
+      (macro_token_tree
+        (metavariable
+          (metavariable_name))
+        (macro_punctuation)
+        (identifier)
+        (macro_punctuation)
+        (metavariable
+          (metavariable_name)
+          (fragment)))
+      (macro_token_tree
+        (identifier)
+        (metavariable
+          (metavariable_name))
+        (identifier)
+        (identifier)
+        (identifier)
+        (metavariable
+          (metavariable_name)))))
+  (attrset_expression
+    (binding_set
+      (binding
+        (attrpath
+          (identifier))
+        (macro_invocation
+          (identifier)
+          (identifier)
+          (macro_punctuation)
+          (identifier))))))

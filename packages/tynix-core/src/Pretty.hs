@@ -80,12 +80,17 @@ render = Render.renderStrict . layoutPretty defaultLayoutOptions
 
 prettyAlias :: TypeAlias -> Doc ann
 prettyAlias alias =
-  "type"
+  (if typeAliasOpaque alias then "opaque type" else "type")
     <+> pretty (typeAliasName alias)
-    <+> hsep (pretty <$> typeAliasParams alias)
+    <+> hsep (zipWith prettyParam (typeAliasParams alias) (typeAliasParamKinds alias <> repeat Nothing))
     <+> "="
     <+> prettyType 0 (typeAliasBody alias)
     <> ";"
+
+prettyParam :: Name -> Maybe Kind -> Doc ann
+prettyParam name = \case
+  Nothing -> pretty name
+  Just kind -> parens (pretty name <+> "::" <+> prettyKind 0 kind)
 
 prettyDecl :: FilePath -> [(Name, Type)] -> Doc ann
 prettyDecl path entries =
@@ -139,6 +144,7 @@ prettyExpr p = \case
   EUnaryOp OpNeg operand -> parenIf (p > 13) ("-" <> prettyExpr 14 operand)
   EHasAttr base path -> parenIf (p > 12) (prettyExpr 13 base <+> "?" <+> prettyAttrPath path)
   ECast expr ty -> parenIf (p > 14) (prettyExpr 14 expr <+> "as" <+> prettyType 0 ty)
+  EAscribe expr ty -> parens (prettyExpr 0 expr <+> "::" <+> prettyType 0 ty)
   EApp f x -> parenIf (p > 15) (prettyExpr 15 f <+> prettyExpr 16 x)
   ESelect base steps -> parenIf (p > 16) (prettyExpr 16 base <> foldMap prettySelectStep steps)
   ESelectOr base steps fallback -> parenIf (p > 15) (prettyExpr 16 base <> foldMap prettySelectStep steps <+> "or" <+> prettyExpr 16 fallback)
@@ -287,12 +293,22 @@ prettyType p ty =
             TTypeList items -> "[" <+> hsep (prettyType 3 <$> items) <+> "]"
             TDynamic -> "dynamic"
             TUnknown -> "unknown"
-            TFun mult a b ->
-              let arrow =
-                    case mult of
-                      One -> "%1 ->"
-                      Many -> "->"
-               in parenIf (p > 0) (prettyType 1 a <+> arrow <+> prettyType 0 b)
+            TArrow arrow a b ->
+              let mult =
+                    case arrowMult arrow of
+                      One -> "%1 "
+                      Many -> mempty
+                  captures = maybe mempty (\names -> if null names then mempty else braces (hsep (punctuate "," (pretty <$> names)))) (arrowCaptures arrow)
+                  domain =
+                    case arrowBinder arrow of
+                      Just name -> parens (pretty name <+> "::" <+> prettyType 0 a)
+                      Nothing -> prettyType 1 a
+                  effects = prettyEffects (arrowEffects arrow)
+                  codomain =
+                    case (effects, b) of
+                      (Just _, TArrow{}) -> parens (prettyType 0 b)
+                      _ -> prettyType 0 b
+               in parenIf (p > 0) (domain <+> mult <> "->" <> captures <+> codomain <> maybe mempty (" !" <+>) effects)
             TRecord fields -> prettyRecordType fields Nothing
             TOpenRecord fields tail' -> prettyRecordType fields (Just tail')
             TOptional inner -> prettyType p inner
@@ -301,6 +317,31 @@ prettyType p ty =
             TForall vars body -> parenIf (p > 0) ("forall" <+> hsep (pretty <$> vars) <> "." <+> prettyType 0 body)
             TConditional a b c d -> parenIf (p > 0) (prettyType 2 a <+> "extends" <+> prettyType 2 b <+> "?" <+> prettyType 0 c <+> ":" <+> prettyType 0 d)
             TInfer name -> "infer" <+> pretty name
+            TSingleton name _ -> pretty name
+
+-- | Render an arrow's latent effect row, or nothing for a pure or untracked
+-- arrow (the two read the same in hovers; only real effects are worth
+-- showing).
+prettyEffects :: Type -> Maybe (Doc ann)
+prettyEffects = \case
+  TDynamic -> Nothing
+  TMeta _ -> Nothing
+  TVar name -> Just (pretty name)
+  TRecord fields
+    | Map.null fields -> Nothing
+    | otherwise -> Just (braces (hsep (punctuate "," (pretty <$> Map.keys fields))))
+  TOpenRecord fields tail'
+    | Map.null fields -> prettyEffects tail'
+    | otherwise ->
+        Just
+          ( braces
+              ( hsep (punctuate "," (pretty <$> Map.keys fields))
+                  <> case tail' of
+                    TVar name -> " |" <+> pretty name
+                    _ -> mempty
+              )
+          )
+  _ -> Nothing
 
 -- | Render a record type. Optional fields print as `name? :: T;`, and an open
 -- row ends in `...` (or `...r` when the row is a named variable).

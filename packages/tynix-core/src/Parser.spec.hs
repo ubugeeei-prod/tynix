@@ -29,7 +29,7 @@ spec = describe "parseProgram" $ do
               "let box = import ./lib.nix; in box.value"
             ]
     programAliases program
-      `shouldBe` [TypeAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
+      `shouldBe` [plainAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
     programAmbient program
       `shouldBe` [AmbientDecl "./lib.nix" [AmbientEntry "default" (TApp (TCon "Box") tInt)]]
     programExpr program
@@ -62,13 +62,13 @@ spec = describe "parseProgram" $ do
   it "parses conditional types with infer binders" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Elem t = t extends List (infer u) ? u : dynamic;"
     programAliases program
-      `shouldBe` [TypeAlias "Elem" ["t"] (TConditional (TVar "t") (TApp (TCon "List") (TInfer "u")) (TVar "u") TDynamic)]
+      `shouldBe` [plainAlias "Elem" ["t"] (TConditional (TVar "t") (TApp (TCon "List") (TInfer "u")) (TVar "u") TDynamic)]
 
   it "parses indexed container types and tensor shapes" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Grid t = Matrix 2 3 t; type Cube t = Tensor [2 3 4] t;"
     programAliases program
-      `shouldBe` [ TypeAlias "Grid" ["t"] (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 3))) (TVar "t")),
-                   TypeAlias
+      `shouldBe` [ plainAlias "Grid" ["t"] (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 3))) (TVar "t")),
+                   plainAlias
                      "Cube"
                      ["t"]
                      (TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)])) (TVar "t"))
@@ -77,7 +77,7 @@ spec = describe "parseProgram" $ do
   it "parses float literals together with range and unit types" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Timeout = Unit \"ms\" (Range 0 5000 Nat); 1.5"
     programAliases program
-      `shouldBe` [ TypeAlias
+      `shouldBe` [ plainAlias
                      "Timeout"
                      []
                      (TApp (TApp (TCon "Unit") (TLit (LString "ms"))) (TApp (TApp (TApp (TCon "Range") (TLit (LInt 0))) (TLit (LInt 5000))) tNat))
@@ -96,8 +96,8 @@ spec = describe "parseProgram" $ do
               ]
           )
     programAliases program
-      `shouldBe` [ TypeAlias "Signed" [] (TApp (TApp (TApp (TCon "Range") (TLit (LInt (-1)))) (TLit (LInt 1))) tInt),
-                   TypeAlias "Shape" [] (TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt (-1)), TLit (LFloat (-2.5))])) tFloat)
+      `shouldBe` [ plainAlias "Signed" [] (TApp (TApp (TApp (TCon "Range") (TLit (LInt (-1)))) (TLit (LInt 1))) tInt),
+                   plainAlias "Shape" [] (TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt (-1)), TLit (LFloat (-2.5))])) tFloat)
                  ]
     programExpr program `shouldBe` Just (plain (EFloat (-1.5)))
 
@@ -208,12 +208,12 @@ spec = describe "parseProgram" $ do
   it "parses any and unknown as distinct built-in gradual types" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Loose = any; type Opaque = unknown;"
     programAliases program
-      `shouldBe` [TypeAlias "Loose" [] tAny, TypeAlias "Opaque" [] tUnknown]
+      `shouldBe` [plainAlias "Loose" [] tAny, plainAlias "Opaque" [] tUnknown]
 
   it "parses parenthesized refinements and unions inside tensor shapes" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Batch t = Tensor [(Range 0 2 Nat) (1 | 2) 4] t;"
     programAliases program
-      `shouldBe` [ TypeAlias
+      `shouldBe` [ plainAlias
                      "Batch"
                      ["t"]
                      ( TApp
@@ -233,12 +233,12 @@ spec = describe "parseProgram" $ do
   it "parses tuple types as type-only heterogeneous sequences" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Pair = Tuple [Int String];"
     programAliases program
-      `shouldBe` [TypeAlias "Pair" [] (TApp (TCon "Tuple") (TTypeList [tInt, tString]))]
+      `shouldBe` [plainAlias "Pair" [] (TApp (TCon "Tuple") (TTypeList [tInt, tString]))]
 
   it "reserves Tuple at the type level while letting terms rebind import, as Nix does" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Pair = Tuple [Int String]; import \"./lib.nix\""
     programAliases program
-      `shouldBe` [TypeAlias "Pair" [] (TApp (TCon "Tuple") (TTypeList [tInt, tString]))]
+      `shouldBe` [plainAlias "Pair" [] (TApp (TCon "Tuple") (TTypeList [tInt, tString]))]
     programExpr program
       `shouldBe` Just (plain (EApp (EVar "import") (EString (DoubleQuoted "./lib.nix"))))
     parseProgram "main.tynix" "let import = 1; in import" `shouldSatisfy` isRight
@@ -247,8 +247,8 @@ spec = describe "parseProgram" $ do
   it "parses linear function arrows alongside ordinary arrows" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Consume a = a %1 -> a; type Endo a = a -> a;"
     programAliases program
-      `shouldBe` [ TypeAlias "Consume" ["a"] (TFun One (TVar "a") (TVar "a")),
-                   TypeAlias "Endo" ["a"] (TFun Many (TVar "a") (TVar "a"))
+      `shouldBe` [ plainAlias "Consume" ["a"] (TFun One (TVar "a") (TVar "a")),
+                   plainAlias "Endo" ["a"] (TFun Many (TVar "a") (TVar "a"))
                  ]
 
   it "parses typed lambda binders" $ do
@@ -289,7 +289,7 @@ spec = describe "parseProgram" $ do
 
   it "treats uppercase type heads as constructors in generic applications" $ do
     program <- expectRight $ parseProgram "main.tynix" "type Use t = Result t;"
-    programAliases program `shouldBe` [TypeAlias "Use" ["t"] (TApp (TCon "Result") (TVar "t"))]
+    programAliases program `shouldBe` [plainAlias "Use" ["t"] (TApp (TCon "Result") (TVar "t"))]
 
   it "parses absolute path imports and nested field selections in applications" $ do
     program <- expectRight $ parseProgram "main.tynix" "(import /etc/hosts).meta.value"

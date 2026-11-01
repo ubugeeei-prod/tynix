@@ -118,6 +118,10 @@ semanticTokensForScan ctx =
       | name == "or" && textAt (i - 2) == "." = (tKeyword, 0)
       | isTypeToken scan i = typeIdentifier i t
       | name `elem` ["type", "declare"] && kindAt (i + 1) `elem` [Just KIdent, Just KString, Just KPath] && textAt (i + 1) /= "=" && atStatementStart i = (tKeyword, 0)
+      | name == "opaque" && textAt (i + 1) == "type" && atStatementStart i = (tKeyword, 0)
+      | name == "macro" && kindAt (i + 1) == Just KIdent && textAt (i + 2) == "{" && atStatementStart i = (tKeyword, 0)
+      -- `name!( ... )` invokes a macro.
+      | textAt (i + 1) == "!" && textAt (i + 2) == "(" && tokEnd t == maybe (-1) tokStart (codeToken scan (i + 1)) = (tFunction, 0)
       | name == "as" && isTypeToken scan (i + 1) = (tKeyword, 0)
       | Just b <- Map.lookup i binderTokens = binderToken' b mDeclaration
       | textAt (i - 1) == "." =
@@ -131,7 +135,7 @@ semanticTokensForScan ctx =
       where
         name = tokText t
 
-    atStatementStart i = i == 0 || textAt (i - 1) `elem` [";", "}"]
+    atStatementStart i = i == 0 || textAt (i - 1) `elem` [";", "}", "opaque"]
 
     typeIdentifier i t
       | name `elem` ["forall", "infer", "extends"] = (tKeyword, 0)

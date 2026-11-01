@@ -36,6 +36,13 @@ a tynix project that `tynix check-project` verifies on every pull request.
 11. [Projects](./projects.md): `tynix init`, `tynix.config.tynix`, `check-project` and `build`.
 12. [CI integration](./ci.md): gate pull requests on the checker.
 
+Going further, each of these stands on its own:
+
+- [13. Effects](./effects.md): tracing, throwing, reading, fetching, purity and pure flakes.
+- [14. Linearity and captures](./linear-types.md): consume-once arguments and what closures may hold.
+- [15. Dependent and opaque types](./dependent-types.md): value-indexed results, phantom types and kinds.
+- [16. Macros](./macros.md): hygienic, declarative, typed code generation.
+
 </div>
 
 ## Conventions

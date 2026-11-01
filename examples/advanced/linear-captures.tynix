@@ -1,0 +1,17 @@
+# Linear arrows consume their argument exactly once; capture sets bound what a
+# closure may hold.
+let
+  consume :: String %1 -> String;
+  consume = token: "used ${token}";
+
+  choose :: Bool -> String %1 -> String;
+  choose = fresh: token: if fresh then consume token else token;
+
+  withLoader :: (Path -> String ! { Read }) -> Path ->{load} String ! { Read };
+  withLoader = load: path: load path;
+
+  offline :: (Path -> String ! { Read }) -> Path ->{} String;
+  offline = load: path: "cached";
+in {
+  inherit choose withLoader offline;
+}

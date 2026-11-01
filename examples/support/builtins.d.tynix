@@ -1,6 +1,11 @@
 declare "builtins" {
   concatStringsSep :: String -> List String -> String;
+  genList :: forall a. (Int -> a) -> (n :: Int) -> Vec n a;
+  getAttr :: forall r. (k :: String) -> r -> Get r k;
   head :: forall a. List a -> a;
   length :: forall a. List a -> Int;
   map :: forall a b. (a -> b) -> List a -> List b;
+  readFile :: Path -> String ! { Read };
+  trace :: forall a. String -> a -> a ! { Trace };
+  tryEval :: forall a. a -> { success :: Bool; value :: a; };
 };

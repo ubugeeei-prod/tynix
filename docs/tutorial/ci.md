@@ -113,6 +113,6 @@ wired the checker into CI. Some good next reads:
 
 <div class="tx-pager">
 
-[← 11. Projects](./projects.md) [Tutorial overview](./index.md)
+[← 11. Projects](./projects.md) [13. Effects →](./effects.md)
 
 </div>

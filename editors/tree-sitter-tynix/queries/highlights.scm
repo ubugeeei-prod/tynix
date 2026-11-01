@@ -167,6 +167,43 @@
 
 (multiplicity) @keyword.modifier
 
+(opaque) @keyword.modifier
+
+"macro" @keyword
+
+; Effect rows (`! { Trace | e }`), capture sets (`->{fetch}`), and kinds.
+(effect_row
+  "!" @operator)
+
+(effect_label) @type.builtin
+
+(capture_set
+  capability: (identifier) @variable.parameter)
+
+(kind) @type.builtin
+
+(kind_arrow
+  "->" @operator)
+
+; Macros: invocations, metavariables, and repetitions.
+(macro_declaration
+  name: (identifier) @function.macro)
+
+(macro_invocation
+  name: (identifier) @function.macro)
+
+(metavariable
+  name: (metavariable_name) @variable.parameter)
+
+(metavariable
+  fragment: (fragment) @type.builtin)
+
+(macro_rule
+  "=>" @operator)
+
+(macro_repetition
+  "$(" @punctuation.special)
+
 ; ---------------------------------------------------------------------------
 ; Types
 

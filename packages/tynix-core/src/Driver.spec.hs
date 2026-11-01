@@ -17,6 +17,16 @@ import Type
 main :: IO ()
 main = hspec spec
 
+-- | A root scheme with each arrow's effect and capture details dropped, for
+-- tests that are about argument and result types only.
+plainRoot :: Analysis -> Maybe Scheme
+plainRoot = fmap (\(Scheme vars ty) -> Scheme vars (plain ty)) . analysisRoot
+  where
+    plain = \case
+      TArrow arrow a b -> TFun (arrowMult arrow) (plain a) (plain b)
+      TRecord fields -> TRecord (fmap plain fields)
+      other -> other
+
 spec :: Spec
 spec = describe "analysis" $ do
   it "infers literal roots" $ do
@@ -29,7 +39,7 @@ spec = describe "analysis" $ do
 
   it "infers int addition inside legacy nix lambdas" $ do
     analysis <- analyzeText "math.nix" "{ inc = x: x + 1; }" >>= expectRight
-    analysisRoot analysis
+    plainRoot analysis
       `shouldBe` Just
         ( Scheme
             []
@@ -86,21 +96,21 @@ spec = describe "analysis" $ do
 
   it "infers numeric results for subtraction and multiplication" $ do
     mul <- analyzeText "math.nix" "{ area = w: h: w * h; }" >>= expectRight
-    analysisRoot mul
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("area", TFun One tNumber (TFun One tNumber tNumber))])))
+    plainRoot mul
+      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("area", TFun Many tNumber (TFun One tNumber tNumber))])))
     sub <- analyzeText "math.nix" "{ diff = a: b: a - b; }" >>= expectRight
-    analysisRoot sub
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun One tNumber (TFun One tNumber tNumber))])))
+    plainRoot sub
+      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun Many tNumber (TFun One tNumber tNumber))])))
 
   it "widens Nat-only subtraction to Int" $ do
     analysis <- analyzeText "main.nix" "{ diff = (a :: Nat): (b :: Nat): a - b; }" >>= expectRight
-    analysisRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun One tNat (TFun One tNat tInt))])))
+    plainRoot analysis
+      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun Many tNat (TFun One tNat tInt))])))
 
   it "concatenates annotated lists into a joined list element type" $ do
     analysis <- analyzeText "main.nix" "{ cat = (xs :: List Int): (ys :: List Int): xs ++ ys; }" >>= expectRight
-    analysisRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("cat", TFun One (tList tInt) (TFun One (tList tInt) (tList tInt)))])))
+    plainRoot analysis
+      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("cat", TFun Many (tList tInt) (TFun One (tList tInt) (tList tInt)))])))
 
   it "concatenates list literals into a structural list" $ do
     analysis <- analyzeText "main.tynix" "[1 2] ++ [3 4]" >>= expectRight
@@ -679,11 +689,11 @@ spec = describe "analysis" $ do
     analyzeText
       "main.tynix"
       (source ["let", "  drop :: Int %1 -> Int;", "  drop = x: 1;", "in drop"])
-      >>= (`expectLeftContaining` "type mismatch")
+      >>= (`expectLeftContaining` "[TC0026] linear binder `x` is never used")
     analyzeText
       "main.tynix"
       (source ["let", "  dup :: Int %1 -> Tuple [Int Int];", "  dup = x: [x x];", "in dup"])
-      >>= (`expectLeftContaining` "type mismatch")
+      >>= (`expectLeftContaining` "[TC0026] linear binder `x` is used more than once")
 
   it "treats imports without declarations as dynamic for incremental adoption" $ do
     analysis <- analyzeText "main.tynix" "import ./unknown.nix" >>= expectRight

@@ -156,6 +156,35 @@
 
 (multiplicity) @attribute
 
+(opaque) @keyword
+
+"macro" @keyword
+
+(effect_row
+  "!" @operator)
+
+(effect_label) @type
+
+(capture_set
+  capability: (identifier) @variable.parameter)
+
+(kind) @type
+
+(macro_declaration
+  name: (identifier) @function)
+
+(macro_invocation
+  name: (identifier) @function)
+
+(metavariable
+  name: (metavariable_name) @variable.special)
+
+(metavariable
+  fragment: (fragment) @type)
+
+(macro_rule
+  "=>" @operator)
+
 ; Types ----------------------------------------------------------------------
 
 (type_identifier) @type

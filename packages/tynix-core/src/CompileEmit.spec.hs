@@ -367,7 +367,7 @@ spec = describe "compile and emit" $ do
   it "preserves aliases when emitting declaration files" $ do
     output <- emitText "main.tynix" "type Box t = { value :: t; }; { boxed = { value = 1; }; }" >>= expectRight
     program <- expectRight (parseDecl "main.d.tynix" output)
-    programAliases program `shouldBe` [TypeAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
+    programAliases program `shouldBe` [plainAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
 
   it "emits indexed container roots with their inferred shapes" $ do
     output <- emitText "main.tynix" "[[1 2] [3 4]]" >>= expectRight

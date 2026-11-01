@@ -19,6 +19,7 @@ Catalog:
 - `polymorphism/`: `forall`, unions, higher-kinded aliases, tuples, and linear arrows
 - `indexed/`: `Vec`, `Matrix`, `Tensor`, `Range`, and `Unit`
 - `interop/`: inline declarations, ambient `.d.tynix` files, and untyped imports
+- `advanced/`: effects, linear arrows and capture sets, dependent and opaque types, kind annotations, and macros
 - `legacy/`: plain `.nix` files used by the interop examples
 - `support/`: workspace declarations for `builtins`, legacy modules, and `tynix.config.tynix`
 

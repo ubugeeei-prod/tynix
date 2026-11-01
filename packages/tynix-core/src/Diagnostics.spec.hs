@@ -44,10 +44,10 @@ spec = do
         (code, all isUpper (take 2 identifier)) `shouldBe` (code, True)
         (code, all isDigit (drop 2 identifier)) `shouldBe` (code, True)
 
-    it "uses only the four documented phase prefixes" $
+    it "uses only the documented phase prefixes" $
       forM_ allDiagnosticCodes $ \code ->
         (code, take 2 (diagnosticCodeText code)) `shouldSatisfy` \(_, prefix) ->
-          prefix `elem` ["TP", "TK", "TC", "TD"]
+          prefix `elem` ["TP", "TK", "TC", "TD", "TX"]
 
     it "names each constructor after the identifier it renders" $
       forM_ allDiagnosticCodes $ \code ->
@@ -81,11 +81,11 @@ spec = do
       expectCode "TP0004" (parseFailure "let x = ;")
 
     it "tags kind mismatches" $ do
-      expectCodeIn "TK0001" (inferAliasKinds [TypeAlias "Bad" ["a"] (TApp tInt (TVar "a"))])
+      expectCodeIn "TK0001" (inferAliasKinds [plainAlias "Bad" ["a"] (TApp tInt (TVar "a"))])
       expectCodeIn "TK0001" (inferTypeKind mempty (TApp (tList tInt) tString))
 
     it "tags the kind occurs check" $
-      expectCodeIn "TK0002" (inferAliasKinds [TypeAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))])
+      expectCodeIn "TK0002" (inferAliasKinds [plainAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))])
 
     it "tags term annotations that do not resolve to Type" $ do
       program <-
@@ -117,7 +117,8 @@ checkSource input = do
       { checkAliases = mempty,
         checkAmbient = mempty,
         checkFile = "codes.tynix",
-        checkOpenScope = False
+        checkOpenScope = False,
+        checkPureEval = False
       }
     program
 

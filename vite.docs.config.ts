@@ -35,6 +35,10 @@ const navigation = [
       { title: "10. Editor Setup", path: "/tutorial/editor" },
       { title: "11. Projects", path: "/tutorial/projects" },
       { title: "12. CI", path: "/tutorial/ci" },
+      { title: "13. Effects", path: "/tutorial/effects" },
+      { title: "14. Linearity & Captures", path: "/tutorial/linear-types" },
+      { title: "15. Dependent & Opaque Types", path: "/tutorial/dependent-types" },
+      { title: "16. Macros", path: "/tutorial/macros" },
     ],
   },
   {
@@ -52,6 +56,7 @@ const navigation = [
       { title: "Grammar", path: "/grammar" },
       { title: "Type System", path: "/type-system" },
       { title: "How Checking Works", path: "/reference/type-system-internals" },
+      { title: "Effects, Linearity & Macros", path: "/reference/advanced-types" },
       { title: "CLI", path: "/reference/cli" },
       { title: "Configuration", path: "/reference/config" },
       { title: "Builtins & Registry", path: "/reference/builtins" },

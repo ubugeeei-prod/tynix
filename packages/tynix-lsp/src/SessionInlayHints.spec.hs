@@ -24,6 +24,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr =
                   Just
                     ( Marked
@@ -45,6 +46,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr =
                   Just
                     ( Marked
@@ -67,6 +69,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr =
                   Just
                     ( Marked
@@ -91,6 +94,7 @@ spec = do
             Program
               { programAliases = [],
                 programAmbient = [],
+                programMacros = [],
                 programExpr =
                   Just
                     ( Marked

@@ -113,7 +113,8 @@ defaultContext =
     { checkAliases = mempty,
       checkAmbient = mempty,
       checkFile = "check.tynix",
-      checkOpenScope = False
+      checkOpenScope = False,
+      checkPureEval = False
     }
 
 checkEither :: CheckContext -> Text -> Either String CheckResult

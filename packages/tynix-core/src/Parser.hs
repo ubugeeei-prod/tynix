@@ -24,6 +24,7 @@ import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Diagnostics (DiagnosticCode (..), withCode)
+import Macro (strayPlaceholders)
 import ParserExpr
 import ParserLexer
 import Syntax
@@ -88,9 +89,19 @@ parseProgramDetailed path input = stripProgramLocations <$> parseProgramLocatedD
 parseProgramLocatedDetailed :: FilePath -> Text -> Either ParseError Program
 parseProgramLocatedDetailed path input = do
   directives <- mapDirectiveError input (scanDiagnosticDirectives input)
-  case runParser (runReaderT (sc *> programParser <* eof) directives) path input of
+  case runParser (runReaderT (sc *> programParser <* eof) mempty{envDirectives = directives}) path input of
     Left bundle -> Left (megaparsecError bundle)
-    Right program -> Right program
+    Right program ->
+      case foldMap (strayPlaceholders . markedValue) (programExpr program) of
+        [] -> Right program
+        stray : _ ->
+          Left
+            ParseError
+              { parseErrorLine = 1,
+                parseErrorColumn = 1,
+                parseErrorMessage =
+                  withCodeText TX0006StrayMacroVariable ("macro metavariable `" <> stray <> "` used outside a macro template")
+              }
 
 mapDirectiveError :: Text -> Either Text a -> Either ParseError a
 mapDirectiveError _ (Right a) = Right a
@@ -106,11 +117,14 @@ megaparsecError bundle =
       SourcePos _ srcLine srcColumn = pstateSourcePos finalState
       humanMessage = Text.pack (errorBundlePretty bundle)
       compactMessage = Text.pack (parseErrorTextPretty firstError)
-      message =
-        withCodeText TP0004ParseError $
-          if Text.null humanMessage
-            then compactMessage
-            else humanMessage
+      message
+        -- Macro expansion failures already carry their own code.
+        | "[TX" `Text.isPrefixOf` compactMessage = Text.strip compactMessage
+        | otherwise =
+            withCodeText TP0004ParseError $
+              if Text.null humanMessage
+                then compactMessage
+                else humanMessage
    in ParseError
         { parseErrorLine = unPos srcLine,
           parseErrorColumn = unPos srcColumn,

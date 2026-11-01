@@ -3,18 +3,23 @@
 // Editors get precise highlighting from the language server's semantic
 // tokens; this grammar only needs to be good enough for static docs. It knows
 // the Nix expression surface plus the type-only layer tynix adds (`::`
-// annotations, `type`, `declare`, `forall`, `extends`/`infer`, `as`, and the
-// `# @tynix-*` directives) so that the brand code theme can paint every
-// type-only construct in the "annotation" colour. Those are exactly the
-// tokens that disappear when tynix compiles to `.nix`.
+// annotations, `type`, `opaque type`, `declare`, `forall`, `extends`/`infer`,
+// effect rows, capture sets, `as`, macros, and the `# @tynix-*` directives) so
+// that the brand code theme can paint every type-only construct in the
+// "annotation" colour. Those are exactly the tokens that disappear when tynix
+// compiles to `.nix`.
 
 const typeExpression = {
   patterns: [
     { include: "#comment" },
+    { include: "#metavariable" },
     { include: "#typeRecord" },
     { begin: "\\(", end: "\\)", patterns: [{ include: "#typeExpr" }] },
     { include: "#string" },
     { match: "\\b(forall|extends|infer)\\b", name: "keyword.other.type.tynix" },
+    { match: "\\b(Type)\\b(?=\\s*(?:->|\\)|$))", name: "keyword.other.type.tynix" },
+    { match: "::", name: "keyword.operator.annotation.tynix" },
+    { match: "!(?!=)", name: "keyword.operator.type.tynix" },
     { match: "\\b(dynamic|unknown|any)\\b", name: "support.type.gradual.tynix" },
     { match: "\\b(true|false)\\b", name: "constant.language.boolean.tynix" },
     { match: "-?\\b\\d+(\\.\\d+)?\\b", name: "constant.numeric.tynix" },
@@ -33,6 +38,9 @@ export const tynixGrammar = {
     { include: "#comment" },
     { include: "#typeAlias" },
     { include: "#declare" },
+    { include: "#macro" },
+    { include: "#macroCall" },
+    { include: "#metavariable" },
     { include: "#signature" },
     { include: "#cast" },
     { include: "#typedBinder" },
@@ -61,12 +69,13 @@ export const tynixGrammar = {
       ],
     },
     typeAlias: {
-      begin: "\\b(type)\\s+([A-Za-z_][A-Za-z0-9_'-]*)((?:\\s+[a-z_][A-Za-z0-9_'-]*)*)\\s*(=)",
+      begin: "\\b(?:(opaque)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_'-]*)((?:\\s+(?:[a-z_][A-Za-z0-9_'-]*|\\([^)]*\\)))*)\\s*(=)",
       beginCaptures: {
         1: { name: "keyword.other.type.tynix" },
-        2: { name: "entity.name.type.alias.tynix" },
-        3: { name: "variable.parameter.type.tynix" },
-        4: { name: "keyword.operator.type.tynix" },
+        2: { name: "keyword.other.type.tynix" },
+        3: { name: "entity.name.type.alias.tynix" },
+        4: { name: "variable.parameter.type.tynix" },
+        5: { name: "keyword.operator.type.tynix" },
       },
       end: ";",
       endCaptures: { 0: { name: "punctuation.terminator.type.tynix" } },
@@ -75,6 +84,35 @@ export const tynixGrammar = {
     declare: {
       match: "\\b(declare)\\b",
       name: "keyword.other.type.tynix",
+    },
+    // `macro name { ($x:expr) => (template); };` is compile-time only, so it is
+    // painted like the rest of the type layer.
+    macro: {
+      match: "\\b(macro)\\s+([A-Za-z_][A-Za-z0-9_'-]*)",
+      captures: {
+        1: { name: "keyword.other.type.tynix" },
+        2: { name: "entity.name.type.alias.tynix" },
+      },
+    },
+    macroCall: {
+      match: "\\b([A-Za-z_][A-Za-z0-9_'-]*)(!)(?=\\()",
+      captures: {
+        1: { name: "entity.name.type.alias.tynix" },
+        2: { name: "keyword.other.type.tynix" },
+      },
+    },
+    metavariable: {
+      patterns: [
+        { match: "\\$\\(|\\)[,;]?[*+?](?=\\s)|=>", name: "keyword.other.type.tynix" },
+        {
+          match: "(\\$[A-Za-z_][A-Za-z0-9_'-]*)(?:(:)(expr|ident|type|string)\\b)?",
+          captures: {
+            1: { name: "variable.parameter.type.tynix" },
+            2: { name: "keyword.operator.annotation.tynix" },
+            3: { name: "keyword.other.type.tynix" },
+          },
+        },
+      ],
     },
     signature: {
       begin: "(::)",
@@ -89,11 +127,16 @@ export const tynixGrammar = {
       endCaptures: { 0: { name: "punctuation.definition.type.record.tynix" } },
       patterns: [
         { include: "#comment" },
+        // Effect rows (`! { Trace | e }`) and capture sets (`->{fetch}`).
+        { match: "\\b[A-Z][A-Za-z0-9_'-]*\\b(?=\\s*[,|}])", name: "entity.name.type.tynix" },
+        { match: "\\b[a-z_][A-Za-z0-9_'-]*\\b(?=\\s*[,}])", name: "variable.parameter.type.tynix" },
+        { match: "[,|]", name: "keyword.operator.type.tynix" },
         {
-          begin: "(\"[^\"]*\"|[A-Za-z_][A-Za-z0-9_'-]*)\\s*(::)",
+          begin: "(\"[^\"]*\"|[A-Za-z_][A-Za-z0-9_'-]*)\\s*(\\?)?\\s*(::)",
           beginCaptures: {
             1: { name: "variable.other.property.tynix" },
-            2: { name: "keyword.operator.annotation.tynix" },
+            2: { name: "keyword.operator.type.tynix" },
+            3: { name: "keyword.operator.annotation.tynix" },
           },
           end: ";",
           endCaptures: { 0: { name: "punctuation.terminator.type.tynix" } },

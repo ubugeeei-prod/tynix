@@ -7,7 +7,9 @@
 -- inventing a heavy token stream.
 module ParserLexer
   ( DirectiveTargets,
+    ParseEnv (..),
     Parser,
+    isPlaceholder,
     attrName,
     brackets,
     directiveForCurrentLine,
@@ -55,13 +57,41 @@ import Type (Name)
 -- | Parser type used throughout the frontend.
 type DirectiveTargets = Map Int DiagnosticDirective
 
-type Parser = ReaderT DirectiveTargets (Parsec Void Text)
+-- | Read-only parsing context: directive comments, the macros in scope (so
+-- invocations can be expanded as they are parsed), and how deeply macro
+-- expansions are nested.
+data ParseEnv = ParseEnv
+  { envDirectives :: DirectiveTargets,
+    envMacros :: Map Name Syntax.MacroDef,
+    envExpansionDepth :: Int,
+    -- | Parsing a template for its definition-time check: nested macro
+    -- invocations are left unexpanded (they are checked at their own
+    -- definitions), which also keeps recursive macros finite.
+    envCheckingTemplate :: Bool
+  }
+
+instance Semigroup ParseEnv where
+  ParseEnv a b c d <> ParseEnv a' b' c' d' = ParseEnv (a <> a') (b <> b') (max c c') (d || d')
+
+instance Monoid ParseEnv where
+  mempty = ParseEnv Map.empty Map.empty 0 False
+
+type Parser = ReaderT ParseEnv (Parsec Void Text)
 
 -- | Look up whether the current source line is targeted by a directive comment.
 directiveForCurrentLine :: Parser (Maybe DiagnosticDirective)
 directiveForCurrentLine = do
   lineNo <- unPos . sourceLine <$> getSourcePos
-  asks (Map.lookup lineNo)
+  asks (Map.lookup lineNo . envDirectives)
+
+-- | Macro metavariables are spelled `$name`. They are accepted wherever an
+-- identifier is, so templates parse with the ordinary grammar; outside a
+-- template they are rejected after parsing.
+isPlaceholder :: Name -> Bool
+isPlaceholder name =
+  case Text.uncons name of
+    Just ('$', rest) -> maybe False (identStart . fst) (Text.uncons rest)
+    _ -> False
 
 -- | Space consumer matching Nix-style comments.
 sc :: Parser ()
@@ -121,9 +151,10 @@ identifierExcluding :: [Text] -> Parser Name
 typeIdentifier = identifierExcluding reservedWords
 
 identifierExcluding excluded = lexeme $ try $ do
+  sigil <- option "" ("$" <$ try (char '$' <* lookAhead (satisfy identStart)))
   first <- satisfy identStart
   rest <- many (satisfy identCont)
-  let name = Text.pack (first : rest)
+  let name = Text.pack (sigil <> (first : rest))
   when (name `elem` excluded) (fail ("reserved word " <> show name))
   pure name
 
@@ -135,9 +166,10 @@ identifierExcluding excluded = lexeme $ try $ do
 -- mirror real upstream APIs.
 fieldName :: Parser Name
 fieldName = lexeme $ do
+  sigil <- option "" ("$" <$ try (char '$' <* lookAhead (satisfy identStart)))
   first <- satisfy identStart
   rest <- many (satisfy identCont)
-  pure (Text.pack (first : rest))
+  pure (Text.pack (sigil <> (first : rest)))
 
 -- | Parse a field, selector, or declaration entry name.
 --
