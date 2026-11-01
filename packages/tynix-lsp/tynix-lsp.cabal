@@ -35,6 +35,8 @@ library
     , SessionText
     , SessionTypes
     , SessionWorkspace
+  other-modules:
+      SessionRequest
   hs-source-dirs: src
   build-depends:
       aeson
@@ -272,6 +274,7 @@ test-suite tynix-lsp-session-spec
     , SessionNavigation
     , SessionPublish
     , SessionReferences
+    , SessionRequest
     , SessionResolve
     , SessionScan
     , SessionSemanticTokens

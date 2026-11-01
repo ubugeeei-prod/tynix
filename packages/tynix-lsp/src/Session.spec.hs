@@ -114,6 +114,22 @@ spec = do
       hover <- hoverDocument (\_ -> pure (Left "boom")) analyzeStub mempty (hoverMessage "/tmp/main.tynix" 0 0)
       hoverText hover `shouldBe` "```tynix\nboom\n```"
 
+  describe "request positions" $ do
+    it "defaults an omitted position to the start of the document" $ do
+      let file = "/tmp/main.tynix"
+          docs = documentsFromList [(file, "box")]
+          withoutPosition = documentSymbolMessage file
+      actual <- hoverDocument readNever analyzeStub docs withoutPosition
+      expected <- hoverDocument readNever analyzeStub docs (hoverMessage file 0 0)
+      actual `shouldBe` expected
+
+    it "resolves and encodes a local symbol after a non-BMP character in UTF-16" $ do
+      let file = "/tmp/main.tynix"
+          content = "let emoji = \"🌸\"; value = 1; in value"
+          docs = documentsFromList [(file, content)]
+      definition <- definitionDocument readNever analyzeCompletion docs (definitionMessage file 0 35)
+      definitionLocation definition `shouldBe` Just (file, 0, 18, 23)
+
   describe "signatureHelpDocument" $ do
     it "renders the parameters of the function applied at the cursor" $ do
       let content = "greet \"hi\""

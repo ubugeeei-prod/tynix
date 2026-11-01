@@ -98,6 +98,7 @@ import SessionReferences
     symbolRanges,
     workspaceDocumentsForTarget,
   )
+import SessionRequest
 import SessionResolve
 import SessionScan
 import SessionSemanticTokens (encodeSemanticTokens, semanticTokensForScan)
@@ -118,16 +119,6 @@ import SessionWorkspace (findBuiltinsFile, workspaceFilesFor)
 import System.Directory (doesDirectoryExist, doesFileExist, getHomeDirectory, listDirectory)
 import System.FilePath (isAbsolute, normalise, takeDirectory, (</>))
 
--- Document cache, workspace, symbol index, reference, and semantic-token
--- data types live in 'SessionTypes'; this module re-imports them so existing
--- call sites and tests keep importing them from 'Session'.
-
--- documentsFromList and lookupDocumentText live in 'SessionDocuments'.
-
--- (Type definitions moved to 'SessionTypes'.)
-
--- updateDocuments and closeDocuments live in 'SessionDocuments'.
-
 -- | Compute hover information for the requested position.
 --
 -- Hover prefers the cached document text so editors see immediate results after
@@ -141,11 +132,9 @@ legacyHoverDocument ::
   IO Value
 legacyHoverDocument readDocument analyze docs msg = do
   let params = field "params" msg
-      textDocument = params >>= field "textDocument"
       position = params >>= field "position"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
-      lineNo = maybe 0 asInt (position >>= field "line")
-      charNo = maybe 0 asInt (position >>= field "character")
+      file = documentFile msg
+      (lineNo, charNo) = positionOf position
   contentResult <- loadDocumentContent readDocument docs file
   case contentResult of
     Left err -> pure (hoverResult (Left err) "" lineNo charNo)
@@ -165,11 +154,9 @@ legacySignatureHelpDocument ::
   IO Value
 legacySignatureHelpDocument readDocument analyze docs msg = do
   let params = field "params" msg
-      textDocument = params >>= field "textDocument"
       position = params >>= field "position"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
-      lineNo = maybe 0 asInt (position >>= field "line")
-      charNo = maybe 0 asInt (position >>= field "character")
+      file = documentFile msg
+      (lineNo, charNo) = positionOf position
   contentResult <- loadDocumentContent readDocument docs file
   case contentResult of
     Left _ -> pure Null
@@ -189,8 +176,7 @@ formattingDocument ::
   Value ->
   IO Value
 formattingDocument readDocument docs msg = do
-  let params = field "params" msg
-      file = maybe "" (normalise . uriPath) (params >>= field "textDocument" >>= field "uri" >>= asText)
+  let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
   pure $ case contentResult of
     Left _ -> emptyEdits
@@ -433,8 +419,7 @@ foldingRangesDocument ::
   Value ->
   IO Value
 foldingRangesDocument readDocument docs msg = do
-  let textDocument = field "params" msg >>= field "textDocument"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
+  let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
   pure $ case contentResult of
     Left _ -> toJSON ([] :: [Value])
@@ -452,8 +437,7 @@ documentLinksDocument ::
   Value ->
   IO Value
 documentLinksDocument readDocument docs msg = do
-  let textDocument = field "params" msg >>= field "textDocument"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
+  let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
   pure $ case contentResult of
     Left _ -> toJSON ([] :: [Value])
@@ -474,119 +458,13 @@ inlayHintsDocument ::
   Value ->
   IO Value
 inlayHintsDocument readDocument analyze docs msg = do
-  let textDocument = field "params" msg >>= field "textDocument"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
+  let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
   case contentResult of
     Left _ -> pure (toJSON ([] :: [Value]))
     Right content -> do
       result <- loadDocumentAnalysis readDocument analyze docs file
       pure (toJSON (encodeInlayHints (inlayHintsFor content result)))
-
-requestDocument ::
-  (FilePath -> IO (Either String Text)) ->
-  Documents ->
-  Value ->
-  IO (FilePath, Int, Int, Either String Text)
-requestDocument readDocument docs msg = do
-  let params = field "params" msg
-      textDocument = params >>= field "textDocument"
-      position = params >>= field "position"
-      file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
-      lineNo = maybe 0 asInt (position >>= field "line")
-      charNo = maybe 0 asInt (position >>= field "character")
-  contentResult <- loadDocumentContent readDocument docs file
-  pure (file, lineNo, charNo, contentResult)
-
--- loadDocumentContent / loadDocumentAnalysis / loadWorkspaceDocuments live in 'SessionDocuments'.
-
--- Reference / definition resolution (workspaceDocumentsForTarget,
--- resolveDefinitionLocation, resolveReferenceTarget, symbolRanges,
--- all*Ranges) lives in 'SessionReferences'.
-
--- Symbol indexing helpers (documentIndexedSymbols, workspaceIndexedSymbols,
--- indexedSymbolInformation, documentCandidateNames, kindForType,
--- findDeclareRange, locationFromRange) live in 'SessionSymbols'.
-
--- workspaceSeedFile lives in 'SessionDocuments'.
-
--- Workspace traversal helpers live in 'SessionWorkspace' so they can be
--- unit-tested in isolation. Re-exported here for back-compat with callers
--- that still import them from 'Session'.
-
--- symbolRanges and all*Ranges live in 'SessionReferences'.
-
--- Span helpers and character classification live in 'SessionText'.
-
--- findDeclareRange and kindForType live in 'SessionSymbols'.
-
--- Edit/diagnostic/quickfix helpers live in 'SessionDiagnostics'.
-
--- The semantic-tokens provider lives in 'SessionSemanticTokens'.
-
--- locationFromRange lives in 'SessionSymbols'.
-
--- lookupCachedDocument / insertDocument / deleteDocument / effectiveCachedAnalysis live in 'SessionDocuments'.
-
--- * Scope- and type-aware handlers ------------------------------------------------
-
---
--- The handlers below build on the error-tolerant scanner ('SessionScan') and
--- the resolver ('SessionResolve'). Each falls back to the original
--- text-based implementation ('legacy*') when it has nothing better to say,
--- so behaviour only ever gets richer.
-
-type DocumentReader = FilePath -> IO (Either String Text)
-
-type DocumentAnalyzer = FilePath -> Text -> IO (Either String Analysis)
-
--- | One positional request with everything handlers usually need.
-data Request = Request
-  { reqFile :: FilePath,
-    reqContent :: Text,
-    reqCtx :: Ctx,
-    reqOffset :: Int
-  }
-
-loadRequestAt :: DocumentReader -> DocumentAnalyzer -> Documents -> FilePath -> Int -> Int -> IO (Either String Request)
-loadRequestAt readDocument analyze docs file lineNo charNo = do
-  contentResult <- loadDocumentContent readDocument docs file
-  case contentResult of
-    Left err -> pure (Left err)
-    Right content -> do
-      result <- loadDocumentAnalysis readDocument analyze docs file
-      let ctx = mkCtx file content result
-          off = positionToOffset (scanLineIndex (ctxScan ctx)) (lineNo, charNo)
-      pure (Right Request{reqFile = file, reqContent = content, reqCtx = ctx, reqOffset = off})
-
-loadRequest :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO (Either String Request)
-loadRequest readDocument analyze docs msg = do
-  let params = field "params" msg
-      position = params >>= field "position"
-      file = maybe "" (normalise . uriPath) (params >>= field "textDocument" >>= field "uri" >>= asText)
-      lineNo = maybe 0 asInt (position >>= field "line")
-      charNo = maybe 0 asInt (position >>= field "character")
-  loadRequestAt readDocument analyze docs file lineNo charNo
-
-reqScan :: Request -> Scan
-reqScan = ctxScan . reqCtx
-
-posValue :: Scan -> Int -> Value
-posValue scan off =
-  let (l, c) = offsetToPosition (scanLineIndex scan) off
-   in object ["line" .= l, "character" .= c]
-
-rangeValueOf :: Scan -> (Int, Int) -> Value
-rangeValueOf scan (s, e) = object ["start" .= posValue scan s, "end" .= posValue scan e]
-
-lineRangeOf :: Scan -> (Int, Int) -> ((Int, Int), (Int, Int))
-lineRangeOf scan (s, e) = (offsetToPosition (scanLineIndex scan) s, offsetToPosition (scanLineIndex scan) e)
-
-locationOf :: FilePath -> Scan -> (Int, Int) -> Value
-locationOf file scan range = object ["uri" .= pathUri file, "range" .= rangeValueOf scan range]
-
-editOf :: Scan -> (Int, Int) -> Text -> Value
-editOf scan range newText = object ["range" .= rangeValueOf scan range, "newText" .= newText]
 
 -- Declaration index ----------------------------------------------------------------
 
@@ -627,7 +505,7 @@ completionEnvOf index =
     }
 
 loadEnv :: DocumentReader -> Documents -> Request -> IO CompletionEnv
-loadEnv readDocument docs r = completionEnvOf <$> loadDeclarationIndex readDocument docs (reqFile r) (reqContent r)
+loadEnv readDocument docs r = completionEnvOf <$> loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
 
 -- Completion -------------------------------------------------------------------------
 
@@ -646,18 +524,18 @@ completionDocument readDocument analyze docs msg = do
 
 completionFor :: CompletionEnv -> Request -> IO Value
 completionFor env r =
-  case completeAt env (reqCtx r) (reqOffset r) of
+  case completeAt env (requestContext r) (requestOffset r) of
     Items range items ->
       pure (encodeCompletionList (slice range) (lineRangeOf scan range) dataPairs items)
     PathEntries dir partial range -> do
-      base <- resolveCompletionDir (reqFile r) dir
+      base <- resolveCompletionDir (requestFile r) dir
       entries <- listEntries base
       pure (encodeCompletionList partial (lineRangeOf scan range) [] (pathCompletionItems partial entries))
   where
-    scan = reqScan r
-    slice (s, e) = Text.take (e - s) (Text.drop s (reqContent r))
-    (lineNo, charNo) = offsetToPosition (scanLineIndex scan) (reqOffset r)
-    dataPairs = ["uri" .= pathUri (reqFile r), "line" .= lineNo, "character" .= charNo]
+    scan = requestScan r
+    slice (s, e) = Text.take (e - s) (Text.drop s (requestContent r))
+    (lineNo, charNo) = offsetToPosition (scanLineIndex scan) (requestOffset r)
+    dataPairs = ["uri" .= pathUri (requestFile r), "line" .= lineNo, "character" .= charNo]
 
 resolveCompletionDir :: FilePath -> FilePath -> IO FilePath
 resolveCompletionDir file dir
@@ -691,7 +569,7 @@ completionResolveDocument readDocument analyze docs msg = do
         Left _ -> pure itemValue
         Right r -> do
           env <- loadEnv readDocument docs r
-          pure $ case completeAt env (reqCtx r) (reqOffset r) of
+          pure $ case completeAt env (requestContext r) (requestOffset r) of
             Items _ items
               | it : _ <- filter ((== label) . itemLabel) items,
                 Just doc <- itemDoc it ->
@@ -708,12 +586,12 @@ hoverDocument readDocument analyze docs msg = do
     Left _ -> legacyHoverDocument readDocument analyze docs msg
     Right r -> do
       env <- loadEnv readDocument docs r
-      case hoverAt env (reqCtx r) (reqOffset r) of
+      case hoverAt env (requestContext r) (requestOffset r) of
         Just (markdown, range) ->
           pure $
             object
               [ "contents" .= object ["kind" .= ("markdown" :: Text), "value" .= markdown],
-                "range" .= rangeValueOf (reqScan r) range
+                "range" .= rangeValueOf (requestScan r) range
               ]
         Nothing -> legacyHoverDocument readDocument analyze docs msg
 
@@ -724,7 +602,7 @@ signatureHelpDocument readDocument analyze docs msg = do
     Left _ -> pure Null
     Right r -> do
       env <- loadEnv readDocument docs r
-      case signatureHelpAt env (reqCtx r) (reqOffset r) of
+      case signatureHelpAt env (requestContext r) (requestOffset r) of
         Null -> legacySignatureHelpDocument readDocument analyze docs msg
         help -> pure help
 
@@ -736,9 +614,9 @@ definitionDocument readDocument analyze docs msg = do
   case loaded of
     Left _ -> legacyDefinitionDocument readDocument analyze docs msg
     Right r -> do
-      let scan = reqScan r
-      case localSymbolAt scan (reqOffset r) of
-        Just sym -> pure (locationOf (reqFile r) scan (declarationRange sym))
+      let scan = requestScan r
+      case localSymbolAt scan (requestOffset r) of
+        Just sym -> pure (locationOf (requestFile r) scan (declarationRange sym))
         Nothing -> do
           viaPath <- pathDefinition r
           case viaPath of
@@ -755,11 +633,11 @@ declarationRange sym = case sym of
 -- | Jump from a path literal to the file (or its @default.nix@).
 pathDefinition :: Request -> IO (Maybe Value)
 pathDefinition r =
-  case codeTokenIndexAt scan (reqOffset r) >>= codeToken scan of
+  case codeTokenIndexAt scan (requestOffset r) >>= codeToken scan of
     Just t
       | tokKind t == KPath,
         any (`Text.isPrefixOf` tokText t) ["./", "../", "/"] -> do
-          let target = Check.resolvePath (reqFile r) (Text.unpack (tokText t))
+          let target = Check.resolvePath (requestFile r) (Text.unpack (tokText t))
           isDir <- doesDirectoryExist target
           let candidate = if isDir then target </> "default.nix" else target
           exists <- doesFileExist candidate
@@ -769,7 +647,7 @@ pathDefinition r =
               else Nothing
     _ -> pure Nothing
   where
-    scan = reqScan r
+    scan = requestScan r
     zeroPos = object ["line" .= (0 :: Int), "character" .= (0 :: Int)]
 
 -- | @m.name@ where @m = import ./file.nix@: jump to the @declare@ entry that
@@ -779,7 +657,7 @@ importedMemberDefinition readDocument docs r =
   case importedTarget of
     Nothing -> pure Nothing
     Just (target, name) -> do
-      index <- loadDeclarationIndex readDocument docs (reqFile r) (reqContent r)
+      index <- loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
       case [ locationOf path sc (ambientDocOffset d, ambientDocOffset d + Text.length name)
            | (path, sc, d) <- declEntries index,
              ambientDocName d == name,
@@ -803,9 +681,9 @@ importedMemberDefinition readDocument docs r =
                     [] -> Nothing
             Left _ -> Nothing
   where
-    scan = reqScan r
+    scan = requestScan r
     importedTarget = do
-      i <- codeTokenIndexAt scan (reqOffset r)
+      i <- codeTokenIndexAt scan (requestOffset r)
       t <- codeToken scan i
       dot <- codeToken scan (i - 1)
       headTok <- codeToken scan (i - 2)
@@ -815,7 +693,7 @@ importedMemberDefinition readDocument docs r =
       importTok <- codeToken scan from
       pathTok <- codeToken scan (from + 1)
       if tokText importTok == "import" && tokKind pathTok == KPath
-        then Just (Check.resolvePath (reqFile r) (Text.unpack (tokText pathTok)), tokText t)
+        then Just (Check.resolvePath (requestFile r) (Text.unpack (tokText pathTok)), tokText t)
         else Nothing
 
 referencesDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
@@ -823,11 +701,11 @@ referencesDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
     Right r
-      | Just sym <- localSymbolAt (reqScan r) (reqOffset r) -> do
+      | Just sym <- localSymbolAt (requestScan r) (requestOffset r) -> do
           let includeDecl = fromMaybe True (field "params" msg >>= field "context" >>= field "includeDeclaration" >>= asBool)
               decl = declarationRange sym
-              ranges = [range | range <- localOccurrences (reqScan r) sym, includeDecl || range /= decl]
-          pure (toJSON (map (locationOf (reqFile r) (reqScan r)) ranges))
+              ranges = [range | range <- localOccurrences (requestScan r) sym, includeDecl || range /= decl]
+          pure (toJSON (map (locationOf (requestFile r) (requestScan r)) ranges))
     _ -> legacyReferencesDocument readDocument analyze docs msg
   where
     asBool (Bool b) = Just b
@@ -838,10 +716,10 @@ documentHighlightsDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
     Right r
-      | Just sym <- localSymbolAt (reqScan r) (reqOffset r) ->
+      | Just sym <- localSymbolAt (requestScan r) (requestOffset r) ->
           pure . toJSON $
-            [ object ["range" .= rangeValueOf (reqScan r) range, "kind" .= (1 :: Int)]
-            | range <- localOccurrences (reqScan r) sym
+            [ object ["range" .= rangeValueOf (requestScan r) range, "kind" .= (1 :: Int)]
+            | range <- localOccurrences (requestScan r) sym
             ]
     _ -> legacyDocumentHighlightsDocument readDocument analyze docs msg
 
@@ -852,8 +730,8 @@ renameDocument readDocument analyze docs msg = do
   case loaded of
     Right r
       | validIdentifier newName,
-        Just sym <- localSymbolAt (reqScan r) (reqOffset r) ->
-          pure (workspaceEdit [(reqFile r, [editOf (reqScan r) range newName | range <- localOccurrences (reqScan r) sym])])
+        Just sym <- localSymbolAt (requestScan r) (requestOffset r) ->
+          pure (workspaceEdit [(requestFile r, [editOf (requestScan r) range newName | range <- localOccurrences (requestScan r) sym])])
     _ -> legacyRenameDocument readDocument analyze docs msg
 
 validIdentifier :: Text -> Bool
@@ -871,8 +749,8 @@ prepareRenameDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   pure $ case loaded of
     Right r
-      | Just (range, current) <- renameableAt (reqScan r) (reqOffset r) ->
-          object ["range" .= rangeValueOf (reqScan r) range, "placeholder" .= current]
+      | Just (range, current) <- renameableAt (requestScan r) (requestOffset r) ->
+          object ["range" .= rangeValueOf (requestScan r) range, "placeholder" .= current]
     _ -> Null
 
 -- Symbols / selection --------------------------------------------------------------------
@@ -882,14 +760,13 @@ documentSymbolsHierarchicalDocument :: DocumentReader -> DocumentAnalyzer -> Doc
 documentSymbolsHierarchicalDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   pure $ case loaded of
-    Right r -> toJSON (encodeSymbolTree (reqScan r) (documentSymbolTree (reqCtx r)))
+    Right r -> toJSON (encodeSymbolTree (requestScan r) (documentSymbolTree (requestContext r)))
     Left _ -> toJSON ([] :: [Value])
 
 selectionRangeDocument :: DocumentReader -> Documents -> Value -> IO Value
 selectionRangeDocument readDocument docs msg = do
-  let params = field "params" msg
-      file = maybe "" (normalise . uriPath) (params >>= field "textDocument" >>= field "uri" >>= asText)
-      positions = case params >>= field "positions" of
+  let file = documentFile msg
+      positions = case field "params" msg >>= field "positions" of
         Just (Array xs) -> foldr (:) [] xs
         _ -> []
   loaded <- loadDocumentContent readDocument docs file
@@ -897,7 +774,7 @@ selectionRangeDocument readDocument docs msg = do
     Left _ -> toJSON ([] :: [Value])
     Right content ->
       let scan = scanDocument content
-          toOffset p = positionToOffset (scanLineIndex scan) (maybe 0 asInt (field "line" p), maybe 0 asInt (field "character" p))
+          toOffset p = positionToOffset (scanLineIndex scan) (positionOf (Just p))
           build [] = Null
           build (range : outer) =
             object $
@@ -913,7 +790,7 @@ semanticTokensDocument readDocument analyze docs msg = do
   pure $ case loaded of
     Left _ -> object ["data" .= ([] :: [Int])]
     Right r ->
-      let tokens = semanticTokensForScan (reqCtx r)
+      let tokens = semanticTokensForScan (requestContext r)
           inRange = case field "params" msg >>= field "range" of
             Just range ->
               let startLine = maybe 0 asInt (field "start" range >>= field "line")
@@ -959,7 +836,7 @@ documentDiagnostics readDocument analyze docs file content result = do
 -- text (never the last good analysis).
 pullDiagnosticsDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 pullDiagnosticsDocument readDocument analyze docs msg = do
-  let file = maybe "" (normalise . uriPath) (field "params" msg >>= field "textDocument" >>= field "uri" >>= asText)
+  let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
   case contentResult of
     Left err -> pure (object ["kind" .= ("full" :: Text), "items" .= [diag err]])
@@ -982,9 +859,8 @@ codeActionsDocument readDocument analyze docs msg = do
   legacy <- legacyCodeActionsDocument readDocument analyze docs msg
   let params = field "params" msg
       start = params >>= field "range" >>= field "start"
-      lineNo = maybe 0 asInt (start >>= field "line")
-      charNo = maybe 0 asInt (start >>= field "character")
-      file = maybe "" (normalise . uriPath) (params >>= field "textDocument" >>= field "uri" >>= asText)
+      (lineNo, charNo) = positionOf start
+      file = documentFile msg
   loaded <- loadRequestAt readDocument analyze docs file lineNo charNo
   pure $ case (legacy, loaded) of
     (Array existing, Right r) ->
@@ -1004,9 +880,9 @@ codeActionsDocument readDocument analyze docs msg = do
 richCodeActions :: Request -> [Value] -> [Value]
 richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signatureActions
   where
-    scan = reqScan r
-    ctx = reqCtx r
-    file = reqFile r
+    scan = requestScan r
+    ctx = requestContext r
+    file = requestFile r
     idx = scanLineIndex scan
     blank = Text.all (`elem` (" \t" :: String))
     action :: Text -> Text -> Bool -> Maybe Value -> [Value] -> Value
@@ -1022,7 +898,7 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
       range <- field "range" d
       s <- field "start" range
       e <- field "end" range
-      let toOff p = positionToOffset idx (maybe 0 asInt (field "line" p), maybe 0 asInt (field "character" p))
+      let toOff p = positionToOffset idx (positionOf (Just p))
       pure (toOff s, toOff e)
     forDiagnostic d =
       let message = fromMaybe "" (field "message" d >>= asText)
@@ -1100,8 +976,8 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
       | b <- scanBinders scan,
         binderKind b == BindLet,
         isNothing (binderSignature b),
-        binderNameStart b <= reqOffset r,
-        reqOffset r <= binderNameEnd b,
+        binderNameStart b <= requestOffset r,
+        requestOffset r <= binderNameEnd b,
         let (l, _) = offsetToPosition idx (binderDeclStart b)
             lineStart = positionToOffset idx (l, 0)
             indent = Text.takeWhile (`elem` (" \t" :: String)) (lineText idx l),
