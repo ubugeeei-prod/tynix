@@ -9,11 +9,13 @@
 module Main (main) where
 
 import Check
+import Check.Inference qualified as Inference
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Parser (parseProgram)
 import Pretty (renderScheme)
+import Syntax (Expr (..), Marked (..), Program (..), SrcSpan (..))
 import System.FilePath (isAbsolute, splitDirectories)
 import Test.Hspec
 import Test.QuickCheck
@@ -73,6 +75,34 @@ spec = do
     it "agrees for a file and the same file reached through a parent segment" $
       resolvePath "src/app/main.tynix" "./lib.nix"
         `shouldBe` resolvePath "src/app/nested/../main.tynix" "./lib.nix"
+
+  describe "inference isolation" $ do
+    it "restores solved metas and the fresh supply after a failed attempt" $ do
+      let result = Inference.runInference $ do
+            original <- Inference.freshMeta
+            _ <- Inference.catchInfer $ do
+              _ <- Inference.bindMeta 0 tString
+              _ <- Inference.freshSoftMeta
+              Inference.throwCheck "discard this attempt"
+            restored <- Inference.zonk original
+            next <- Inference.freshMeta
+            soft <- Inference.isSoftMeta 1
+            pure (restored, next, soft)
+      result `shouldBe` Right (TMeta 0, TMeta 1, False)
+
+    it "commits the solutions of a successful attempt" $ do
+      let result = Inference.runInference $ do
+            original <- Inference.freshMeta
+            _ <- Inference.catchInfer (Inference.bindMeta 0 tString)
+            Inference.zonk original
+      result `shouldBe` Right tString
+
+    it "preserves the innermost source span when propagating a failure" $ do
+      let inner = SrcSpan 2 9
+          expression = ELoc (SrcSpan 0 10) (ELoc inner (EVar "missing"))
+          program = Program [] [] (Just (Marked Nothing expression)) []
+      fmap checkErrorSpan (either Just (const Nothing) (checkProgramDetailed defaultContext program))
+        `shouldBe` Just (Just inner)
 
   describe "checkProgram" $ do
     it "returns no root for a declaration-only program" $ do

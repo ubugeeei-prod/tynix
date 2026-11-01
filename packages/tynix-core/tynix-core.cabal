@@ -31,6 +31,12 @@ library
     , Subtyping
     , Syntax
     , Type
+  other-modules:
+      Check.Constraints
+    , Check.Diagnostics
+    , Check.Effects
+    , Check.Expression
+    , Check.Inference
   hs-source-dirs:
       src
   build-depends:
@@ -53,6 +59,11 @@ common spec-defaults
       Alias
     , BuiltinPrelude
     , Check
+    , Check.Constraints
+    , Check.Diagnostics
+    , Check.Effects
+    , Check.Expression
+    , Check.Inference
     , Compile
     , Diagnostics
     , Driver

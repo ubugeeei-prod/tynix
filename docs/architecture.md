@@ -12,6 +12,19 @@ Haskell is the core implementation language. Editor integrations stay thin and a
   - type checker
   - declaration emitter
   - `.tynix -> .nix` compiler
+
+  `Check` retains the public checker API and syntax-directed expression
+  inference. Its private modules separate the underlying responsibilities:
+
+  - `Check.Inference` — inference state, transactional attempts, scheme generalization
+  - `Check.Constraints` — directional constraints, structural unification, casts
+  - `Check.Effects` — effect-row constraints and handler scopes
+  - `Check.Expression` — dependency discovery and binder-usage analysis
+  - `Check.Diagnostics` — shared rendering of diagnostic names and types
+
+  Only `Check.Inference` reads or writes inference state. Failed speculative
+  attempts restore substitutions, the fresh-variable supply, soft metas, effect scopes, and usage tracking.
+
 - `tynix-cli`
   - `compile`
   - `check`
@@ -24,11 +37,12 @@ Haskell is the core implementation language. Editor integrations stay thin and a
   - go to definition
   - declaration lookup
 
-  Internally split into focused modules. `Session.hs` is now a thin
-  request-dispatcher layer; the heavy lifting lives in:
+  `Session` composes request handlers and their text-based fallbacks.
+  Shared request plumbing and feature algorithms live in focused modules:
 
   - `AnalysisCache` — content-keyed memoization of driver runs
   - `SessionTypes` — shared records (Documents, IndexedSymbol, etc.)
+  - `SessionRequest` — private request decoding, analysis loading, UTF-16 position encoding
   - `SessionDocuments` — didOpen/didChange/didClose + workspace loader
   - `SessionWorkspace` — workspace traversal and marker discovery
   - `SessionSymbols` — document / workspace symbol index
