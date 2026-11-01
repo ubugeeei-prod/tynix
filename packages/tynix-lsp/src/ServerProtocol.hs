@@ -73,7 +73,13 @@ readMessageOutcome handle = do
       headers <- readHeaders handle
       case contentLengthFromHeaders headers of
         Nothing ->
-          pure (ReadError ("missing or malformed Content-Length header (got " <> renderHeaders headers <> ")"))
+          pure
+            ( ReadError
+                ( "missing or malformed Content-Length header (got "
+                    <> renderHeaders headers
+                    <> ")"
+                )
+            )
         Just len -> do
           body <- BS.hGet handle len
           case decodeStrict' body of
@@ -119,11 +125,16 @@ readHeaders handle = go []
 send :: Handle -> Value -> IO ()
 send handle payload = do
   let body = encode payload
-  B8.hPutStr handle ("Content-Length: " <> B8.pack (show (LBS.length body)) <> "\r\n\r\n")
+  B8.hPutStr
+    handle
+    ("Content-Length: " <> B8.pack (show (LBS.length body)) <> "\r\n\r\n")
   LBS.hPutStr handle body
   hFlush handle
 
 -- | Send a JSON-RPC notification (no @id@, fire-and-forget) with the given
 -- method name and params payload.
 notify :: Handle -> Text -> Value -> IO ()
-notify handle method params = send handle (object ["jsonrpc" .= ("2.0" :: Text), "method" .= method, "params" .= params])
+notify handle method params =
+  send
+    handle
+    (object ["jsonrpc" .= ("2.0" :: Text), "method" .= method, "params" .= params])

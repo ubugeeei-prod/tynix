@@ -17,7 +17,13 @@ import Data.Text.IO qualified as TextIO
 import Driver (Analysis (..), parseText)
 import Session
 import Syntax
-import System.Directory (createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeFile, removePathForcibly)
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    getTemporaryDirectory,
+    removeFile,
+    removePathForcibly,
+  )
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import Test.Hspec
@@ -38,24 +44,30 @@ spec = do
 
     it "applies incremental changes against cached documents" $ do
       let docs = documentsFromList [("/tmp/main.tynix", "let value = 1;\n")]
-          msg = changeMessage "/tmp/main.tynix" [replaceRange 0 4 0 9 "result", replaceRange 0 13 0 14 "2"]
+          msg =
+            changeMessage
+              "/tmp/main.tynix"
+              [replaceRange 0 4 0 9 "result", replaceRange 0 13 0 14 "2"]
       (docs', _, result) <- updateDocuments readNever analyzeStub docs msg
       lookupDocumentText "/tmp/main.tynix" docs' `shouldBe` Just "let result = 2;\n"
-      fmap analysisBindings result `shouldBe` Right (Map.fromList [("result", Scheme [] tInt)])
+      fmap analysisBindings result
+        `shouldBe` Right (Map.fromList [("result", Scheme [] tInt)])
 
     it "rejects uncached ranged incremental updates without a baseline" $ do
       let msg = changeMessage "/tmp/main.tynix" [replaceRange 0 0 0 1 "2"]
       (docs, file, result) <- updateDocuments readNever analyzeStub mempty msg
       file `shouldBe` "/tmp/main.tynix"
       lookupDocumentText file docs `shouldBe` Nothing
-      result `shouldBe` Left "cannot apply incremental changes without an open document baseline"
+      result
+        `shouldBe` Left "cannot apply incremental changes without an open document baseline"
 
     it "accepts uncached full-text didChange updates without a baseline" $ do
       let msg = changeMessage "/tmp/main.tynix" [object ["text" .= ("2" :: Text)]]
       (docs, file, result) <- updateDocuments readNever analyzeStub mempty msg
       file `shouldBe` "/tmp/main.tynix"
       lookupDocumentText file docs `shouldBe` Just "2"
-      fmap analysisBindings result `shouldBe` Right (Map.fromList [("result", Scheme [] tInt)])
+      fmap analysisBindings result
+        `shouldBe` Right (Map.fromList [("result", Scheme [] tInt)])
 
     it "keeps the previous cache when incremental edits are invalid" $ do
       let docs = documentsFromList [("/tmp/main.tynix", "x")]
@@ -103,15 +115,30 @@ spec = do
   describe "hoverDocument" $ do
     it "prefers cached content over disk when computing hover" $ do
       let docs = documentsFromList [("/tmp/main.tynix", "box")]
-      hover <- hoverDocument (\_ -> pure (Left "should not read")) analyzeStub docs (hoverMessage "/tmp/main.tynix" 0 1)
+      hover <-
+        hoverDocument
+          (\_ -> pure (Left "should not read"))
+          analyzeStub
+          docs
+          (hoverMessage "/tmp/main.tynix" 0 1)
       hoverText hover `shouldBe` "```tynix\nbox :: String\n```"
 
     it "falls back to disk when the document is not cached" $ do
-      hover <- hoverDocument (\_ -> pure (Right "1")) analyzeStub mempty (hoverMessage "/tmp/main.tynix" 0 0)
+      hover <-
+        hoverDocument
+          (\_ -> pure (Right "1"))
+          analyzeStub
+          mempty
+          (hoverMessage "/tmp/main.tynix" 0 0)
       hoverText hover `shouldBe` "```tynix\nInt\n```"
 
     it "renders readable hover errors when reading from disk fails" $ do
-      hover <- hoverDocument (\_ -> pure (Left "boom")) analyzeStub mempty (hoverMessage "/tmp/main.tynix" 0 0)
+      hover <-
+        hoverDocument
+          (\_ -> pure (Left "boom"))
+          analyzeStub
+          mempty
+          (hoverMessage "/tmp/main.tynix" 0 0)
       hoverText hover `shouldBe` "```tynix\nboom\n```"
 
   describe "request positions" $ do
@@ -127,7 +154,12 @@ spec = do
       let file = "/tmp/main.tynix"
           content = "let emoji = \"🌸\"; value = 1; in value"
           docs = documentsFromList [(file, content)]
-      definition <- definitionDocument readNever analyzeCompletion docs (definitionMessage file 0 35)
+      definition <-
+        definitionDocument
+          readNever
+          analyzeCompletion
+          docs
+          (definitionMessage file 0 35)
       definitionLocation definition `shouldBe` Just (file, 0, 18, 23)
 
   describe "signatureHelpDocument" $ do
@@ -135,146 +167,288 @@ spec = do
       let content = "greet \"hi\""
           analyze _ _ =
             pure $ do
-              program <- either (const (parseText "/tmp/main.tynix" "1")) Right (parseText "/tmp/main.tynix" content)
+              program <-
+                either
+                  (const (parseText "/tmp/main.tynix" "1"))
+                  Right
+                  (parseText "/tmp/main.tynix" content)
               pure
                 completionAnalysis
                   { analysisProgram = program,
-                    analysisBindings = Map.fromList [("greet", Scheme [] (TFun Many tString tString))]
+                    analysisBindings =
+                      Map.fromList [("greet", Scheme [] (TFun Many tString tString))]
                   }
-      sig <- signatureHelpDocument readNever analyze (documentsFromList [("/tmp/main.tynix", content)]) (hoverMessage "/tmp/main.tynix" 0 6)
+      sig <-
+        signatureHelpDocument
+          readNever
+          analyze
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (hoverMessage "/tmp/main.tynix" 0 6)
       signatureLabels sig `shouldBe` ["greet :: String -> String"]
       signatureActiveParameter sig `shouldBe` Just 0
 
     it "returns null when no function is applied at the cursor" $ do
-      sig <- signatureHelpDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", "1")]) (hoverMessage "/tmp/main.tynix" 0 1)
+      sig <-
+        signatureHelpDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", "1")])
+          (hoverMessage "/tmp/main.tynix" 0 1)
       sig `shouldBe` Null
 
   describe "formattingDocument" $ do
     it "formats a comment-free document by re-rendering it" $ do
-      edits <- formattingDocument readNever (documentsFromList [("/tmp/main.tynix", "{ a = 1; b = 2; }")]) (documentSymbolMessage "/tmp/main.tynix")
+      edits <-
+        formattingDocument
+          readNever
+          (documentsFromList [("/tmp/main.tynix", "{ a = 1; b = 2; }")])
+          (documentSymbolMessage "/tmp/main.tynix")
       case formattingEditTexts edits of
         [text] -> ("a = 1;" `Text.isInfixOf` text) `shouldBe` True
         other -> expectationFailure ("expected one edit, got " <> show other)
 
     it "is a no-op when the document contains comments" $ do
-      edits <- formattingDocument readNever (documentsFromList [("/tmp/main.tynix", "{ a = 1; } # keep me")]) (documentSymbolMessage "/tmp/main.tynix")
+      edits <-
+        formattingDocument
+          readNever
+          (documentsFromList [("/tmp/main.tynix", "{ a = 1; } # keep me")])
+          (documentSymbolMessage "/tmp/main.tynix")
       formattingEditTexts edits `shouldBe` []
 
     it "is a no-op when the document cannot be parsed" $ do
-      edits <- formattingDocument readNever (documentsFromList [("/tmp/main.tynix", "let x = ;")]) (documentSymbolMessage "/tmp/main.tynix")
+      edits <-
+        formattingDocument
+          readNever
+          (documentsFromList [("/tmp/main.tynix", "let x = ;")])
+          (documentSymbolMessage "/tmp/main.tynix")
       formattingEditTexts edits `shouldBe` []
 
   describe "completionDocument" $ do
     it "returns field completions from the current analyzed buffer" $ do
-      completions <- completionDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", "box.")]) (completionMessage "/tmp/main.tynix" 0 4)
+      completions <-
+        completionDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", "box.")])
+          (completionMessage "/tmp/main.tynix" 0 4)
       completionLabels completions `shouldBe` ["alpha", "beta"]
 
-    it "keeps offering completions from the last successful analysis while the buffer is temporarily invalid" $ do
-      let file = "/tmp/main.tynix"
-          validContent = Text.unlines ["let", "  box = { alpha = 1; beta = \"x\"; };", "in box.alpha"]
-          invalidContent = Text.unlines ["let", "  box = { alpha = 1; beta = \"x\"; };", "in box."]
-      (validDocs, _, _) <- updateDocuments readNever analyzeStrictCompletion mempty (openMessage file validContent)
-      (invalidDocs, _, invalidResult) <- updateDocuments readNever analyzeStrictCompletion validDocs (changeMessage file [object ["text" .= invalidContent]])
-      invalidResult `shouldSatisfy` isLeft
-      completions <- completionDocument readNever analyzeStrictCompletion invalidDocs (completionMessage file 2 7)
-      completionLabels completions `shouldBe` ["alpha", "beta"]
+    it
+      "keeps offering completions from the last successful analysis while the buffer is temporarily invalid"
+      $ do
+        let file = "/tmp/main.tynix"
+            validContent = Text.unlines ["let", "  box = { alpha = 1; beta = \"x\"; };", "in box.alpha"]
+            invalidContent = Text.unlines ["let", "  box = { alpha = 1; beta = \"x\"; };", "in box."]
+        (validDocs, _, _) <-
+          updateDocuments
+            readNever
+            analyzeStrictCompletion
+            mempty
+            (openMessage file validContent)
+        (invalidDocs, _, invalidResult) <-
+          updateDocuments
+            readNever
+            analyzeStrictCompletion
+            validDocs
+            (changeMessage file [object ["text" .= invalidContent]])
+        invalidResult `shouldSatisfy` isLeft
+        completions <-
+          completionDocument
+            readNever
+            analyzeStrictCompletion
+            invalidDocs
+            (completionMessage file 2 7)
+        completionLabels completions `shouldBe` ["alpha", "beta"]
 
     it "returns an empty completion list when loading the document fails" $ do
-      completions <- completionDocument (\_ -> pure (Left "boom")) analyzeCompletion mempty (completionMessage "/tmp/main.tynix" 0 0)
+      completions <-
+        completionDocument
+          (\_ -> pure (Left "boom"))
+          analyzeCompletion
+          mempty
+          (completionMessage "/tmp/main.tynix" 0 0)
       completionLabels completions `shouldBe` []
 
   describe "definitionDocument" $ do
     it "jumps to the local binding of the selected symbol" $ do
       let content = Text.unlines ["let", "  value = 1;", "in value"]
-      definition <- definitionDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 2 6)
+      definition <-
+        definitionDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 2 6)
       definitionLocation definition `shouldBe` Just ("/tmp/main.tynix", 1, 2, 7)
 
     it "jumps builtins members into the nearest ambient declaration file" $
       withTempTree
-        [ ("builtins.d.tynix", Text.unlines ["declare \"builtins\" {", "  map :: Int -> Int;", "};"]),
+        [ ( "builtins.d.tynix",
+            Text.unlines ["declare \"builtins\" {", "  map :: Int -> Int;", "};"]
+          ),
           ("app/main.tynix", "builtins.map")
         ]
         ( \root -> do
             let file = root </> "app/main.tynix"
-            definition <- definitionDocument readFileStub analyzeCompletion mempty (definitionMessage file 0 10)
-            definitionLocation definition `shouldBe` Just (root </> "builtins.d.tynix", 1, 2, 5)
+            definition <-
+              definitionDocument
+                readFileStub
+                analyzeCompletion
+                mempty
+                (definitionMessage file 0 10)
+            definitionLocation definition
+              `shouldBe` Just (root </> "builtins.d.tynix", 1, 2, 5)
         )
 
   describe "referencesDocument" $ do
     it "returns all local references for a binding in the active buffer" $ do
       let content = Text.unlines ["let", "  value = 1;", "in value value"]
-      references <- referencesDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 2 6)
-      referenceLocations references `shouldBe` [("/tmp/main.tynix", 1, 2, 7), ("/tmp/main.tynix", 2, 3, 8), ("/tmp/main.tynix", 2, 9, 14)]
+      references <-
+        referencesDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 2 6)
+      referenceLocations references
+        `shouldBe` [ ("/tmp/main.tynix", 1, 2, 7),
+                     ("/tmp/main.tynix", 2, 3, 8),
+                     ("/tmp/main.tynix", 2, 9, 14)
+                   ]
 
     it "returns UTF-16 reference ranges after non-BMP text" $ do
       let content = Text.unlines ["let", "  label = \"\x1f600\"; value = 1;", "in value"]
-      references <- referencesDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 2 6)
-      referenceLocations references `shouldBe` [("/tmp/main.tynix", 1, 16, 21), ("/tmp/main.tynix", 2, 3, 8)]
+      references <-
+        referencesDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 2 6)
+      referenceLocations references
+        `shouldBe` [("/tmp/main.tynix", 1, 16, 21), ("/tmp/main.tynix", 2, 3, 8)]
 
   describe "documentHighlightsDocument" $ do
     it "highlights every occurrence of the selected local binding" $ do
       let content = Text.unlines ["let", "  value = 1;", "in value value"]
-      highlights <- documentHighlightsDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 2 6)
-      documentHighlightRanges highlights `shouldBe` [(1, 2, 7, 1), (2, 3, 8, 1), (2, 9, 14, 1)]
+      highlights <-
+        documentHighlightsDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 2 6)
+      documentHighlightRanges highlights
+        `shouldBe` [(1, 2, 7, 1), (2, 3, 8, 1), (2, 9, 14, 1)]
 
     it "returns an empty list when the cursor lands on whitespace" $ do
       let content = Text.unlines ["let", "  value = 1;", "in value"]
-      highlights <- documentHighlightsDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 1 0)
+      highlights <-
+        documentHighlightsDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 1 0)
       documentHighlightRanges highlights `shouldBe` []
 
     it "returns UTF-16 highlight ranges after non-BMP text" $ do
       let content = Text.unlines ["let", "  label = \"\x1f600\"; value = 1;", "in value"]
-      highlights <- documentHighlightsDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (definitionMessage "/tmp/main.tynix" 2 6)
+      highlights <-
+        documentHighlightsDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (definitionMessage "/tmp/main.tynix" 2 6)
       documentHighlightRanges highlights `shouldBe` [(1, 16, 21, 1), (2, 3, 8, 1)]
 
   describe "renameDocument" $
     it "builds workspace edits for local references" $ do
       let content = Text.unlines ["let", "  value = 1;", "in value"]
-      rename <- renameDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (renameMessage "/tmp/main.tynix" 2 6 "answer")
-      renameEdits rename `shouldBe` [("/tmp/main.tynix", [(1, 2, 7, "answer"), (2, 3, 8, "answer")])]
+      rename <-
+        renameDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (renameMessage "/tmp/main.tynix" 2 6 "answer")
+      renameEdits rename
+        `shouldBe` [("/tmp/main.tynix", [(1, 2, 7, "answer"), (2, 3, 8, "answer")])]
 
   describe "documentSymbolsDocument" $
     it "surfaces aliases and let bindings as symbols" $ do
-      let content = Text.unlines ["type Box = { value :: Int; };", "let", "  value = 1;", "in value"]
-      symbols <- documentSymbolsDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (documentSymbolMessage "/tmp/main.tynix")
+      let content =
+            Text.unlines
+              ["type Box = { value :: Int; };", "let", "  value = 1;", "in value"]
+      symbols <-
+        documentSymbolsDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (documentSymbolMessage "/tmp/main.tynix")
       symbolNames symbols `shouldBe` ["Box", "value"]
 
   describe "workspaceSymbolsDocument" $
     it "searches symbols across workspace files" $
       withTempTree
-        [ ("tynix.config.tynix", Text.unlines ["{", "  name = \"demo\";", "  entry = \"./pkg/a.tynix\";", "}"]),
+        [ ( "tynix.config.tynix",
+            Text.unlines ["{", "  name = \"demo\";", "  entry = \"./pkg/a.tynix\";", "}"]
+          ),
           ("pkg/a.tynix", Text.unlines ["type Box = { value :: Int; };", "1"]),
           ("pkg/b.tynix", Text.unlines ["let", "  widget = 1;", "in widget"])
         ]
         ( \root -> do
-            let docs = documentsFromList [(root </> "pkg/a.tynix", Text.unlines ["type Box = { value :: Int; };", "1"])]
-            symbols <- workspaceSymbolsDocument readFileStub analyzeCompletion docs (workspaceSymbolMessage "wid")
+            let docs =
+                  documentsFromList
+                    [(root </> "pkg/a.tynix", Text.unlines ["type Box = { value :: Int; };", "1"])]
+            symbols <-
+              workspaceSymbolsDocument
+                readFileStub
+                analyzeCompletion
+                docs
+                (workspaceSymbolMessage "wid")
             symbolNames symbols `shouldBe` ["widget"]
         )
 
   describe "codeActionsDocument" $
     it "offers directive quick fixes and obvious rename suggestions" $ do
       let content = "mising"
-          diagnostic = object ["message" .= ("unbound name: \"mising\"" :: Text), "range" .= rangeObject 0 0 0 6]
-      actions <- codeActionsDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (codeActionMessage "/tmp/main.tynix" [diagnostic])
-      codeActionTitles actions `shouldBe` ["Add `# @tynix-ignore`", "Add `# @tynix-expected`", "Replace with `missing`"]
+          diagnostic =
+            object
+              [ "message" .= ("unbound name: \"mising\"" :: Text),
+                "range" .= rangeObject 0 0 0 6
+              ]
+      actions <-
+        codeActionsDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (codeActionMessage "/tmp/main.tynix" [diagnostic])
+      codeActionTitles actions
+        `shouldBe` ["Add `# @tynix-ignore`", "Add `# @tynix-expected`", "Replace with `missing`"]
 
   describe "semanticTokensDocument" $ do
     it "returns encoded semantic tokens for keywords, types, and strings" $ do
-      let content = Text.unlines ["type Box = String;", "let", "  value = \"tynix\";", "in value"]
-      tokens <- semanticTokensDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (documentSymbolMessage "/tmp/main.tynix")
+      let content =
+            Text.unlines ["type Box = String;", "let", "  value = \"tynix\";", "in value"]
+      tokens <-
+        semanticTokensDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (documentSymbolMessage "/tmp/main.tynix")
       semanticTokenPayload tokens `shouldSatisfy` (not . null)
 
     it "encodes semantic token offsets in UTF-16 columns" $ do
       let content = "\x1f600 value"
-      tokens <- semanticTokensDocument readNever analyzeCompletion (documentsFromList [("/tmp/main.tynix", content)]) (documentSymbolMessage "/tmp/main.tynix")
+      tokens <-
+        semanticTokensDocument
+          readNever
+          analyzeCompletion
+          (documentsFromList [("/tmp/main.tynix", content)])
+          (documentSymbolMessage "/tmp/main.tynix")
       take 5 (semanticTokenPayload tokens) `shouldBe` [0, 3, 5, 3, 0]
   where
     readNever _ = expectationFailure "unexpected file read" >> fail "unexpected file read"
     readFileStub = fmap Right . TextIO.readFile
     analyzeStub file content
       | content == "1" = pure (attachProgramFallback file content intAnalysis)
-      | content == "box" = pure (attachProgramFallback file content stringBindingAnalysis)
+      | content == "box" =
+          pure (attachProgramFallback file content stringBindingAnalysis)
       | otherwise = pure (attachProgramFallback file content defaultAnalysis)
     analyzeCompletion file content = pure (dynamicAnalysis file content)
     analyzeStrictCompletion file content = pure (strictDynamicAnalysis file content)
@@ -580,7 +754,8 @@ definitionLocation value = do
   Number lineNo <- KeyMap.lookup "line" start
   Number startChar <- KeyMap.lookup "character" start
   Number endChar <- KeyMap.lookup "character" end
-  pure (Text.unpack (Text.drop 7 uri), floor lineNo, floor startChar, floor endChar)
+  pure
+    (Text.unpack (Text.drop 7 uri), floor lineNo, floor startChar, floor endChar)
 
 referenceLocations :: Value -> [(FilePath, Int, Int, Int)]
 referenceLocations value =
@@ -663,7 +838,8 @@ semanticTokenPayload value =
     _ -> []
 
 withTempTree :: [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
-withTempTree files action = bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
+withTempTree files action =
+  bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
   where
     createRoot = do
       tmp <- getTemporaryDirectory

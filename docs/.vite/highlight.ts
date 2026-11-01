@@ -37,7 +37,8 @@ const tokenVars = [
   "token-annotation",
 ] as const;
 type TokenVar = (typeof tokenVars)[number];
-const sentinel = (name: TokenVar) => `#0000${tokenVars.indexOf(name).toString(16).padStart(2, "0")}`;
+const sentinel = (name: TokenVar) =>
+  `#0000${tokenVars.indexOf(name).toString(16).padStart(2, "0")}`;
 const varFor = new Map(tokenVars.map((name) => [sentinel(name), name]));
 
 const annotationScopes = [
@@ -54,23 +55,64 @@ const annotationScopes = [
 const sentinelTheme = {
   name: "tynix-tokens",
   type: "dark" as const,
-  colors: { "editor.background": "#000000", "editor.foreground": sentinel("foreground") },
+  colors: {
+    "editor.background": "#000000",
+    "editor.foreground": sentinel("foreground"),
+  },
   settings: [
     { settings: { foreground: sentinel("foreground") } },
-    { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: sentinel("token-comment"), fontStyle: "italic" } },
-    { scope: ["keyword.control.directive.tynix"], settings: { foreground: sentinel("token-function"), fontStyle: "bold" } },
-    { scope: ["keyword", "support.function.import"], settings: { foreground: sentinel("token-keyword") } },
-    { scope: ["string", "string.unquoted.path"], settings: { foreground: sentinel("token-string") } },
-    { scope: ["constant.character.escape"], settings: { foreground: sentinel("token-string-expression") } },
-    { scope: ["punctuation.section.embedded"], settings: { foreground: sentinel("token-punctuation") } },
     {
-      scope: ["constant.numeric", "constant.language", "variable.other.property", "support.variable"],
+      scope: ["comment", "punctuation.definition.comment"],
+      settings: { foreground: sentinel("token-comment"), fontStyle: "italic" },
+    },
+    {
+      scope: ["keyword.control.directive.tynix"],
+      settings: { foreground: sentinel("token-function"), fontStyle: "bold" },
+    },
+    {
+      scope: ["keyword", "support.function.import"],
+      settings: { foreground: sentinel("token-keyword") },
+    },
+    {
+      scope: ["string", "string.unquoted.path"],
+      settings: { foreground: sentinel("token-string") },
+    },
+    {
+      scope: ["constant.character.escape"],
+      settings: { foreground: sentinel("token-string-expression") },
+    },
+    {
+      scope: ["punctuation.section.embedded"],
+      settings: { foreground: sentinel("token-punctuation") },
+    },
+    {
+      scope: [
+        "constant.numeric",
+        "constant.language",
+        "variable.other.property",
+        "support.variable",
+      ],
       settings: { foreground: sentinel("token-constant") },
     },
-    { scope: ["variable.parameter"], settings: { foreground: sentinel("token-parameter") } },
-    { scope: ["keyword.operator", "punctuation"], settings: { foreground: sentinel("token-punctuation") } },
-    { scope: annotationScopes, settings: { foreground: sentinel("token-annotation") } },
-    { scope: ["support.type.gradual.tynix"], settings: { foreground: sentinel("token-annotation"), fontStyle: "italic" } },
+    {
+      scope: ["variable.parameter"],
+      settings: { foreground: sentinel("token-parameter") },
+    },
+    {
+      scope: ["keyword.operator", "punctuation"],
+      settings: { foreground: sentinel("token-punctuation") },
+    },
+    {
+      scope: annotationScopes,
+      settings: { foreground: sentinel("token-annotation") },
+    },
+    {
+      scope: ["support.type.gradual.tynix"],
+      settings: {
+        foreground: sentinel("token-annotation"),
+        fontStyle: "italic",
+      },
+    },
   ],
 };
 
@@ -84,7 +126,12 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
-const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const escapeHtml = (text: string) =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 const decodeHtml = (html: string) =>
   html
     .replace(/<[^>]+>/g, "")
@@ -94,7 +141,8 @@ const decodeHtml = (html: string) =>
     .replace(/&#39;|&#x27;/g, "'")
     .replace(/&amp;/g, "&");
 
-const preStyle = "background-color:var(--octc-syntax-background);color:var(--octc-syntax-foreground)";
+const preStyle =
+  "background-color:var(--octc-syntax-background);color:var(--octc-syntax-foreground)";
 
 function span(text: string, color: TokenVar, fontStyle = 0): string {
   const styles = [`color:var(--octc-syntax-${color})`];
@@ -106,15 +154,31 @@ function span(text: string, color: TokenVar, fontStyle = 0): string {
 // Line annotations (`{2,4-5}`, `// [!code ...]`) arrive as classes on
 // per-line spans; keep them when a block is re-highlighted.
 const lineClasses = (inner: string) =>
-  inner.split("\n").map((line) => line.match(/^<span class="(line(?:\s[^"]*)?)"/)?.[1] ?? "line");
+  inner
+    .split("\n")
+    .map(
+      (line) => line.match(/^<span class="(line(?:\s[^"]*)?)"/)?.[1] ?? "line",
+    );
 
-async function highlightTynix(code: string, classesByLine: string[]): Promise<string> {
+async function highlightTynix(
+  code: string,
+  classesByLine: string[],
+): Promise<string> {
   const hl = await getHighlighter();
-  const { tokens } = hl.codeToTokens(code.replace(/\n$/, ""), { lang: "tynix", theme: "tynix-tokens" });
+  const { tokens } = hl.codeToTokens(code.replace(/\n$/, ""), {
+    lang: "tynix",
+    theme: "tynix-tokens",
+  });
   return tokens
     .map((line, i) => {
       const body = line
-        .map((token) => span(token.content, varFor.get((token.color ?? "").toLowerCase()) ?? "foreground", token.fontStyle ?? 0))
+        .map((token) =>
+          span(
+            token.content,
+            varFor.get((token.color ?? "").toLowerCase()) ?? "foreground",
+            token.fontStyle ?? 0,
+          ),
+        )
         .join("");
       return `<span class="${classesByLine[i] ?? "line"}">${body}</span>`;
     })
@@ -125,17 +189,29 @@ const plainLines = (code: string, classesByLine: string[]) =>
   code
     .replace(/\n$/, "")
     .split("\n")
-    .map((line, i) => `<span class="${classesByLine[i] ?? "line"}">${line ? span(line, "foreground") : ""}</span>`)
+    .map(
+      (line, i) =>
+        `<span class="${classesByLine[i] ?? "line"}">${line ? span(line, "foreground") : ""}</span>`,
+    )
     .join("\n");
 
-const attr = (attrs: string, name: string) => attrs.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
-const classes = (attrs: string) => (attr(attrs, "class") ?? "").split(/\s+/).filter(Boolean);
-const langLabels: Record<string, string> = { "d.tynix": "tynix", text: "", plaintext: "", sh: "shell", bash: "shell" };
+const attr = (attrs: string, name: string) =>
+  attrs.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
+const classes = (attrs: string) =>
+  (attr(attrs, "class") ?? "").split(/\s+/).filter(Boolean);
+const langLabels: Record<string, string> = {
+  "d.tynix": "tynix",
+  text: "",
+  plaintext: "",
+  sh: "shell",
+  bash: "shell",
+};
 
 function frame(pre: string, preAttrs: string, lang: string): string {
   const title = attr(preAttrs, "data-code-title");
   const label = langLabels[lang] ?? lang;
-  const copy = '<button type="button" class="tx-copy" aria-label="Copy code"><span>Copy</span></button>';
+  const copy =
+    '<button type="button" class="tx-copy" aria-label="Copy code"><span>Copy</span></button>';
   const bar = title
     ? `<div class="tx-code__bar"><span class="tx-code__title">${title}</span>${label ? `<span class="tx-code__lang">${label}</span>` : ""}${copy}</div>`
     : `<div class="tx-code__float">${label ? `<span class="tx-code__lang">${label}</span>` : ""}${copy}</div>`;
@@ -153,20 +229,31 @@ export async function processCodeBlocks(html: string): Promise<string> {
       (async () => {
         const [whole, preAttrs = "", codeAttrs = "", inner] = match;
         const codeClasses = classes(codeAttrs);
-        const lang = attr(preAttrs, "data-language") ?? codeClasses.find((c) => c.startsWith("language-"))?.slice(9) ?? "text";
+        const lang =
+          attr(preAttrs, "data-language") ??
+          codeClasses.find((c) => c.startsWith("language-"))?.slice(9) ??
+          "text";
         // The frame renders the title, so drop Ox Content's own title strip.
-        const preClasses = classes(preAttrs).filter((c) => c !== "ox-code-block--with-title");
+        const preClasses = classes(preAttrs).filter(
+          (c) => c !== "ox-code-block--with-title",
+        );
         let body = inner;
         if (!preClasses.includes("ox-highlight")) {
           const code = decodeHtml(inner);
           const perLine = lineClasses(inner);
-          body = lang === "tynix" || lang === "d.tynix" ? await highlightTynix(code, perLine) : plainLines(code, perLine);
+          body =
+            lang === "tynix" || lang === "d.tynix"
+              ? await highlightTynix(code, perLine)
+              : plainLines(code, perLine);
           preClasses.unshift("ox-highlight", "css-variables");
         }
         // The native engine leaves an empty line for the fence's final newline.
         body = body.replace(/\n?<span class="line"><\/span>\s*$/, "");
         const keptAttrs = preAttrs
-          .replace(/\s(class|style|tabindex|data-language|data-code-title)="[^"]*"/g, "")
+          .replace(
+            /\s(class|style|tabindex|data-language|data-code-title)="[^"]*"/g,
+            "",
+          )
           .trim();
         const pre =
           `<pre class="${preClasses.join(" ")}" style="${preStyle}" tabindex="0" data-language="${lang}"${keptAttrs ? ` ${keptAttrs}` : ""}>` +

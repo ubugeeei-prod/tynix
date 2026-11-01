@@ -2,7 +2,14 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { defineTheme, oxContent } from "@ox-content/vite-plugin";
-import { codeTokens, fonts, headHtml, themeColors, themeCss, themeJs } from "./docs/.vite/brand.ts";
+import {
+  codeTokens,
+  fonts,
+  headHtml,
+  themeColors,
+  themeCss,
+  themeJs,
+} from "./docs/.vite/brand.ts";
 import { processSite } from "./docs/.vite/highlight.ts";
 
 // Canonical public origin. Override with TYNIX_DOCS_SITE_URL for preview
@@ -37,7 +44,10 @@ const navigation = [
       { title: "12. CI", path: "/tutorial/ci" },
       { title: "13. Effects", path: "/tutorial/effects" },
       { title: "14. Linearity & Captures", path: "/tutorial/linear-types" },
-      { title: "15. Dependent & Opaque Types", path: "/tutorial/dependent-types" },
+      {
+        title: "15. Dependent & Opaque Types",
+        path: "/tutorial/dependent-types",
+      },
       { title: "16. Macros", path: "/tutorial/macros" },
     ],
   },
@@ -56,7 +66,10 @@ const navigation = [
       { title: "Grammar", path: "/grammar" },
       { title: "Type System", path: "/type-system" },
       { title: "How Checking Works", path: "/reference/type-system-internals" },
-      { title: "Effects, Linearity & Macros", path: "/reference/advanced-types" },
+      {
+        title: "Effects, Linearity & Macros",
+        path: "/reference/advanced-types",
+      },
       { title: "CLI", path: "/reference/cli" },
       { title: "Configuration", path: "/reference/config" },
       { title: "Builtins & Registry", path: "/reference/builtins" },
@@ -96,7 +109,8 @@ const theme = defineTheme({
   },
   footer: {
     message: "Gradual types for Nix.",
-    copyright: 'Released under the MIT license · <a href="https://github.com/ubugeeei-prod/tynix">GitHub</a>',
+    copyright:
+      'Released under the MIT license · <a href="https://github.com/ubugeeei-prod/tynix">GitHub</a>',
   },
   socialLinks: {
     github: "https://github.com/ubugeeei-prod/tynix",

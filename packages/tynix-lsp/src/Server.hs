@@ -67,7 +67,16 @@ import ServerProtocol
 import ServerUri (pathUri, uriPath)
 import Subtyping (lookupRecordField, resolveType)
 import System.IO (Handle)
-import Type (Multiplicity (..), Name, Scheme (..), Type (..), TypeAlias, schemeFromAnnotation, tDynamic, tPath)
+import Type
+  ( Multiplicity (..),
+    Name,
+    Scheme (..),
+    Type (..),
+    TypeAlias,
+    schemeFromAnnotation,
+    tDynamic,
+    tPath,
+  )
 
 field :: Text -> Value -> Maybe Value
 field key (Object obj) = KeyMap.lookup (Key.fromText key) obj
@@ -90,77 +99,78 @@ clientCapabilities = serverCapabilities False
 -- @diagnosticProvider@ and clients pull diagnostics instead of receiving
 -- @publishDiagnostics@ notifications.
 serverCapabilities :: Bool -> Value
-serverCapabilities pullDiagnostics =
-  object
-    [ "capabilities"
-        .= object
-          ( [ "positionEncoding" .= ("utf-16" :: Text),
-              "hoverProvider" .= True,
-              "completionProvider"
-                .= object
-                  [ "triggerCharacters" .= ["." :: Text, "/"],
-                    "resolveProvider" .= True,
-                    "completionItem" .= object ["labelDetailsSupport" .= True]
-                  ],
-              "signatureHelpProvider"
-                .= object
-                  [ "triggerCharacters" .= [" " :: Text, "("],
-                    "retriggerCharacters" .= [" " :: Text]
-                  ],
-              "definitionProvider" .= True,
-              "declarationProvider" .= True,
-              "referencesProvider" .= True,
-              "renameProvider" .= object ["prepareProvider" .= True],
-              "documentSymbolProvider" .= True,
-              "workspaceSymbolProvider" .= True,
-              "workspace"
-                .= object
-                  [ "didChangeWatchedFiles" .= object ["dynamicRegistration" .= False],
-                    "didChangeConfiguration" .= object ["dynamicRegistration" .= False]
-                  ],
-              "codeActionProvider" .= object ["codeActionKinds" .= ["quickfix" :: Text, "refactor.rewrite"]],
-              "documentHighlightProvider" .= True,
-              "documentFormattingProvider" .= True,
-              "documentLinkProvider" .= object ["resolveProvider" .= False],
-              "foldingRangeProvider" .= True,
-              "selectionRangeProvider" .= True,
-              "inlayHintProvider" .= object ["resolveProvider" .= False],
-              "semanticTokensProvider"
-                .= object
-                  [ "legend"
-                      .= object
-                        [ "tokenTypes"
-                            .= [ "keyword" :: Text,
-                                 "type",
-                                 "function",
-                                 "variable",
-                                 "property",
-                                 "string",
-                                 "number",
-                                 "operator",
-                                 "parameter",
-                                 "typeParameter",
-                                 "comment",
-                                 "namespace",
-                                 "decorator"
-                               ],
-                          "tokenModifiers" .= ["declaration" :: Text, "readonly", "defaultLibrary", "deprecated"]
-                        ],
-                    "full" .= True,
-                    "range" .= True
-                  ],
-              "textDocumentSync"
-                .= object
-                  [ "openClose" .= True,
-                    "change" .= (2 :: Int),
-                    "save" .= object ["includeText" .= True]
-                  ]
-            ]
-              <> [ "diagnosticProvider" .= object ["interFileDependencies" .= True, "workspaceDiagnostics" .= False]
-                 | pullDiagnostics
-                 ]
-          )
-    ]
+serverCapabilities pullDiagnostics = object ["capabilities" .= object capabilities]
+  where
+    capabilities =
+      [ "positionEncoding" .= ("utf-16" :: Text),
+        "hoverProvider" .= True,
+        "completionProvider" .= completion,
+        "signatureHelpProvider" .= signatureHelp,
+        "definitionProvider" .= True,
+        "declarationProvider" .= True,
+        "referencesProvider" .= True,
+        "renameProvider" .= object ["prepareProvider" .= True],
+        "documentSymbolProvider" .= True,
+        "workspaceSymbolProvider" .= True,
+        "workspace" .= workspace,
+        "codeActionProvider"
+          .= object ["codeActionKinds" .= ["quickfix" :: Text, "refactor.rewrite"]],
+        "documentHighlightProvider" .= True,
+        "documentFormattingProvider" .= True,
+        "documentLinkProvider" .= object ["resolveProvider" .= False],
+        "foldingRangeProvider" .= True,
+        "selectionRangeProvider" .= True,
+        "inlayHintProvider" .= object ["resolveProvider" .= False],
+        "semanticTokensProvider" .= semanticTokens,
+        "textDocumentSync" .= textSync
+      ]
+        <> ["diagnosticProvider" .= diagnostics | pullDiagnostics]
+    completion =
+      object
+        [ "triggerCharacters" .= ["." :: Text, "/"],
+          "resolveProvider" .= True,
+          "completionItem" .= object ["labelDetailsSupport" .= True]
+        ]
+    signatureHelp =
+      object
+        [ "triggerCharacters" .= [" " :: Text, "("],
+          "retriggerCharacters" .= [" " :: Text]
+        ]
+    workspace =
+      object
+        [ "didChangeWatchedFiles" .= object ["dynamicRegistration" .= False],
+          "didChangeConfiguration" .= object ["dynamicRegistration" .= False]
+        ]
+    semanticTokens = object ["legend" .= tokenLegend, "full" .= True, "range" .= True]
+    tokenLegend =
+      object
+        [ "tokenTypes" .= tokenTypes,
+          "tokenModifiers"
+            .= ["declaration" :: Text, "readonly", "defaultLibrary", "deprecated"]
+        ]
+    tokenTypes :: [Text]
+    tokenTypes =
+      [ "keyword",
+        "type",
+        "function",
+        "variable",
+        "property",
+        "string",
+        "number",
+        "operator",
+        "parameter",
+        "typeParameter",
+        "comment",
+        "namespace",
+        "decorator"
+      ]
+    textSync =
+      object
+        [ "openClose" .= True,
+          "change" .= (2 :: Int),
+          "save" .= object ["includeText" .= True]
+        ]
+    diagnostics = object ["interFileDependencies" .= True, "workspaceDiagnostics" .= False]
 
 firstChange :: Maybe Value -> Maybe Value
 firstChange params = do
@@ -175,11 +185,18 @@ contentChanges params =
 
 applyContentChanges :: Text -> Maybe Value -> Either String Text
 applyContentChanges initial params =
-  foldl' (\acc change -> acc >>= (`applyContentChange` change)) (Right initial) (contentChanges params)
+  foldl'
+    (\acc change -> acc >>= (`applyContentChange` change))
+    (Right initial)
+    (contentChanges params)
 
 applyContentChange :: Text -> Value -> Either String Text
 applyContentChange content change = do
-  replacement <- maybe (Left "content change is missing text") Right (field "text" change >>= asText)
+  replacement <-
+    maybe
+      (Left "content change is missing text")
+      Right
+      (field "text" change >>= asText)
   case field "range" change of
     Nothing -> Right replacement
     Just range -> do
@@ -191,9 +208,21 @@ applyContentChange content change = do
   where
     rangePos :: Text -> Value -> Either String (Int, Int)
     rangePos key range = do
-      pos <- maybe (Left ("content change range is missing " <> T.unpack key)) Right (field key range)
-      lineNo <- maybe (Left ("content change range is missing " <> T.unpack key <> ".line")) Right (field "line" pos)
-      charNo <- maybe (Left ("content change range is missing " <> T.unpack key <> ".character")) Right (field "character" pos)
+      pos <-
+        maybe
+          (Left ("content change range is missing " <> T.unpack key))
+          Right
+          (field key range)
+      lineNo <-
+        maybe
+          (Left ("content change range is missing " <> T.unpack key <> ".line"))
+          Right
+          (field "line" pos)
+      charNo <-
+        maybe
+          (Left ("content change range is missing " <> T.unpack key <> ".character"))
+          Right
+          (field "character" pos)
       Right (asInt lineNo, asInt charNo)
 
 positionOffset :: Text -> (Int, Int) -> Either String Int
@@ -231,7 +260,9 @@ textOffsetToUtf16Column line offset =
 
 textRangeToUtf16Columns :: Text -> Int -> Int -> (Int, Int)
 textRangeToUtf16Columns line startOffset endOffset =
-  (textOffsetToUtf16Column line startOffset, textOffsetToUtf16Column line endOffset)
+  ( textOffsetToUtf16Column line startOffset,
+    textOffsetToUtf16Column line endOffset
+  )
 
 utf16CharWidth :: Char -> Int
 utf16CharWidth char
@@ -239,7 +270,12 @@ utf16CharWidth char
   | otherwise = 1
 
 diag :: String -> Value
-diag err = object ["range" .= object ["start" .= pos, "end" .= pos], "severity" .= (1 :: Int), "message" .= err]
+diag err =
+  object
+    [ "range" .= object ["start" .= pos, "end" .= pos],
+      "severity" .= (1 :: Int),
+      "message" .= err
+    ]
   where
     pos = object ["line" .= (0 :: Int), "character" .= (0 :: Int)]
 
@@ -281,7 +317,8 @@ publishDiagnostics file result =
           result
     ]
 
-publishDiagnosticsWithContent :: FilePath -> Text -> Either String Analysis -> Value
+publishDiagnosticsWithContent ::
+  FilePath -> Text -> Either String Analysis -> Value
 publishDiagnosticsWithContent file content result =
   object
     [ "uri" .= pathUri file,
@@ -353,23 +390,21 @@ hoveredPathAt lineNo charNo content =
 -- JSON @null@ when no function call is in scope.
 signatureHelpResult :: Either String Analysis -> Text -> Int -> Int -> Value
 signatureHelpResult result content lineNo charNo =
-  case result of
-    Left _ -> Null
-    Right analysis ->
-      case signatureAt analysis lineNo charNo content of
-        Nothing -> Null
-        Just (name, scheme, activeParam) ->
-          let params = arrowDomains (schemeType scheme)
-           in object
-                [ "signatures"
-                    .= [ object
-                           [ "label" .= (name <> " :: " <> renderScheme scheme),
-                             "parameters" .= [object ["label" .= renderType paramTy] | paramTy <- params]
-                           ]
-                       ],
-                  "activeSignature" .= (0 :: Int),
-                  "activeParameter" .= activeParam
-                ]
+  maybe Null renderResult (either (const Nothing) signature result)
+  where
+    signature analysis = signatureAt analysis lineNo charNo content
+    renderResult (name, scheme, activeParam) =
+      object
+        [ "signatures" .= [signatureValue name scheme],
+          "activeSignature" .= (0 :: Int),
+          "activeParameter" .= activeParam
+        ]
+    signatureValue name scheme =
+      object
+        [ "label" .= (name <> " :: " <> renderScheme scheme),
+          "parameters" .= map parameter (arrowDomains (schemeType scheme))
+        ]
+    parameter ty = object ["label" .= renderType ty]
 
 -- | Locate the function being applied at the cursor and its active parameter.
 signatureAt :: Analysis -> Int -> Int -> Text -> Maybe (Text, Scheme, Int)
@@ -457,13 +492,21 @@ semanticRange content err = do
   if "missing field" `T.isPrefixOf` err
     then findFieldRange content needle <|> findWordRange content needle
     else
-      if any (`T.isPrefixOf` err) ["duplicate bindings", "duplicate signatures", "missing bindings for signatures"]
+      if any
+        (`T.isPrefixOf` err)
+        [ "duplicate bindings",
+          "duplicate signatures",
+          "missing bindings for signatures"
+        ]
         then findDefinitionRange content needle <|> findWordRange content needle
         else findWordRange content needle
 
 firstQuoted :: Text -> Maybe Text
 firstQuoted text =
-  case [(T.length before, name) | q <- ["\"", "`"], before : name : _ : _ <- [T.splitOn q text]] of
+  case [ (T.length before, name)
+       | q <- ["\"", "`"],
+         before : name : _ : _ <- [T.splitOn q text]
+       ] of
     [] -> Nothing
     found -> Just (snd (minimum found))
 
@@ -516,7 +559,11 @@ topLevelCandidates analysis =
       <> importCandidate
       <> Map.toList (analysisBindings analysis)
   where
-    builtinsCandidate = maybe [] (\scheme -> [("builtins", scheme)]) (Map.lookup "builtins" (analysisAmbient analysis))
+    builtinsCandidate =
+      maybe
+        []
+        (\scheme -> [("builtins", scheme)])
+        (Map.lookup "builtins" (analysisAmbient analysis))
     rootFieldCandidates =
       case analysisRoot analysis of
         Just scheme ->
@@ -619,7 +666,8 @@ findFieldRange content symbol =
       ( \(lineNo, line) ->
           fmap
             ( \startOffset ->
-                let (startChar, endChar) = textRangeToUtf16Columns line startOffset (startOffset + T.length symbol)
+                let endOffset = startOffset + T.length symbol
+                    (startChar, endChar) = textRangeToUtf16Columns line startOffset endOffset
                  in (lineNo, startChar, endChar)
             )
             (fieldSpan line symbol)
@@ -638,7 +686,8 @@ findWordRange content symbol =
       ( \(lineNo, line) ->
           fmap
             ( \startOffset ->
-                let (startChar, endChar) = textRangeToUtf16Columns line startOffset (startOffset + T.length symbol)
+                let endOffset = startOffset + T.length symbol
+                    (startChar, endChar) = textRangeToUtf16Columns line startOffset endOffset
                  in (lineNo, startChar, endChar)
             )
             (wordSpan line symbol)
@@ -700,7 +749,10 @@ clearDiagnostics file = object ["uri" .= pathUri file, "diagnostics" .= ([] :: [
 respond :: Handle -> Value -> Value -> IO ()
 respond handle request result =
   case field "id" request of
-    Just ident -> send handle (object ["jsonrpc" .= ("2.0" :: Text), "id" .= ident, "result" .= result])
+    Just ident ->
+      send
+        handle
+        (object ["jsonrpc" .= ("2.0" :: Text), "id" .= ident, "result" .= result])
     Nothing -> pure ()
 
 -- | Send a JSON-RPC error response mirroring the request @id@.

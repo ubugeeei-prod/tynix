@@ -182,7 +182,12 @@ reduceTypeOperator env ty =
             (TLit (LInt x), TLit (LInt y)) -> Just (TLit (LInt (apply x y)))
             (a', b')
               | symbolic a' || symbolic b' -> Nothing
-              | isSubtype env a' tInt && isSubtype env b' tInt -> Just (if op == "Sub" || not (isSubtype env a' tNat && isSubtype env b' tNat) then tInt else tNat)
+              | isSubtype env a' tInt && isSubtype env b' tInt ->
+                  Just
+                    ( if op == "Sub" || not (isSubtype env a' tNat && isSubtype env b' tNat)
+                        then tInt
+                        else tNat
+                    )
               | otherwise -> Just tNumber
     (TCon "Length", [seqTy]) ->
       let seq' = normalizeIndexedType (resolveHead env seqTy)
@@ -349,44 +354,35 @@ lookupRecordField env ty field =
 --   => Unit "ms" Nat
 -- @
 joinTypes :: AliasEnv -> Type -> Type -> Type
-joinTypes env left right =
-  case () of
-    _
-      | left' == tAny || right' == tAny -> tAny
-      | otherwise ->
-          case (unitView left', unitView right') of
-            (Just (leftUnit, leftBase), Just (rightUnit, rightBase))
-              | leftUnit == rightUnit ->
-                  TApp (TApp (TCon "Unit") leftUnit) (joinTypes env leftBase rightBase)
-            _ ->
-              case (tupleView left', tupleView right') of
-                (Just leftItems, Just rightItems)
-                  | length leftItems == length rightItems ->
-                      TApp (TCon "Tuple") (TTypeList (zipWith (joinTypes env) leftItems rightItems))
-                _ ->
-                  case (tensorView left', tensorView right') of
-                    (Just (leftShape, leftElem), Just (rightShape, rightElem))
-                      | length leftShape == length rightShape ->
-                          surfaceTensor (zipWith (joinTypes env) leftShape rightShape) (joinTypes env leftElem rightElem)
-                      | otherwise ->
-                          case (listView left', listView right') of
-                            (Just leftList, Just rightList) -> joinTypes env leftList rightList
-                            _ -> fallback
-                    _ ->
-                      case (listView left', listView right') of
-                        (Just leftList, Just rightList) -> joinTypes env leftList rightList
-                        _ -> fallback
+joinTypes env left right
+  | left' == tAny || right' == tAny = tAny
+  | Just (leftUnit, leftBase) <- unitView left',
+    Just (rightUnit, rightBase) <- unitView right',
+    leftUnit == rightUnit =
+      TApp (TApp (TCon "Unit") leftUnit) (joinTypes env leftBase rightBase)
+  | Just leftItems <- tupleView left',
+    Just rightItems <- tupleView right',
+    length leftItems == length rightItems =
+      TApp (TCon "Tuple") (TTypeList (zipWith (joinTypes env) leftItems rightItems))
+  | Just (leftShape, leftElem) <- tensorView left',
+    Just (rightShape, rightElem) <- tensorView right',
+    length leftShape == length rightShape =
+      surfaceTensor
+        (zipWith (joinTypes env) leftShape rightShape)
+        (joinTypes env leftElem rightElem)
+  | Just leftList <- listView left',
+    Just rightList <- listView right' =
+      joinTypes env leftList rightList
+  | left' == right' = left'
+  | isSubtype env left' right' = right'
+  | isSubtype env right' left' = left'
+  | not (bothNumericLiterals left' right'),
+    Just joinedNumeric <- joinNumericTypes left' right' =
+      joinedNumeric
+  | otherwise = flattenUnion (TUnion [left', right'])
   where
     left' = resolveHead env left
     right' = resolveHead env right
-    fallback
-      | left' == right' = left'
-      | isSubtype env left' right' = right'
-      | isSubtype env right' left' = left'
-      | not (bothNumericLiterals left' right'),
-        Just joinedNumeric <- joinNumericTypes left' right' =
-          joinedNumeric
-      | otherwise = flattenUnion (TUnion [left', right'])
 
 -- | Decide whether two types can coexist under gradual typing rules.
 --
@@ -434,7 +430,8 @@ isConsistent env = go
         _
           | Just (fields, tailA) <- recordView a,
             Just (fields', tailB) <- recordView b ->
-              and (Map.intersectionWith (\x y -> go (unOptional x) (unOptional y)) fields fields')
+              and
+                (Map.intersectionWith (\x y -> go (unOptional x) (unOptional y)) fields fields')
                 && coveredBy fields tailA fields'
                 && coveredBy fields' tailB fields
         _ -> False
@@ -520,7 +517,8 @@ isSubtype env = go
             && rangeBoundsWithin leftLower leftUpper rightLower rightUpper
       | Just (leftLower, leftUpper, leftBase) <- rangeView a,
         b == tNat =
-          (leftBase == tInt || leftBase == tNat) && nonNegativeIntegerBounds leftLower leftUpper
+          (leftBase == tInt || leftBase == tNat)
+            && nonNegativeIntegerBounds leftLower leftUpper
       | Just (_, _, leftBase) <- rangeView a =
           go leftBase b
     step a b
@@ -672,17 +670,26 @@ data NumericBound
 -- | Check whether a numeric singleton lies within an inclusive range.
 literalWithinRange :: Type -> Type -> Type -> Bool
 literalWithinRange actual lowerTy upperTy =
-  case (numericLiteralTypeValue actual, numericBoundValue lowerTy, numericBoundValue upperTy) of
+  case ( numericLiteralTypeValue actual,
+         numericBoundValue lowerTy,
+         numericBoundValue upperTy
+       ) of
     (Just actualValue, Just lowerValue, Just upperValue) ->
-      compareNumericBound actualValue lowerValue /= LT && compareNumericBound actualValue upperValue /= GT
+      compareNumericBound actualValue lowerValue /= LT
+        && compareNumericBound actualValue upperValue /= GT
     _ -> False
 
 -- | Check whether one inclusive range is enclosed by another.
 rangeBoundsWithin :: Type -> Type -> Type -> Type -> Bool
 rangeBoundsWithin leftLower leftUpper rightLower rightUpper =
-  case (numericBoundValue leftLower, numericBoundValue leftUpper, numericBoundValue rightLower, numericBoundValue rightUpper) of
+  case ( numericBoundValue leftLower,
+         numericBoundValue leftUpper,
+         numericBoundValue rightLower,
+         numericBoundValue rightUpper
+       ) of
     (Just leftLow, Just leftHigh, Just rightLow, Just rightHigh) ->
-      compareNumericBound leftLow rightLow /= LT && compareNumericBound leftHigh rightHigh /= GT
+      compareNumericBound leftLow rightLow /= LT
+        && compareNumericBound leftHigh rightHigh /= GT
     _ -> False
 
 -- | Recognize integer ranges that stay non-negative and ordered.
@@ -774,10 +781,13 @@ joinNumericBases left right
 --
 -- This is separate from bound inclusion because `Range 0 10 Nat` can subtype
 -- `Number` even before we compare its exact interval with anything.
-rangeBaseSubtype :: (Type -> Type -> Bool) -> Type -> Type -> Type -> Type -> Bool
+rangeBaseSubtype ::
+  (Type -> Type -> Bool) -> Type -> Type -> Type -> Type -> Bool
 rangeBaseSubtype subtype lowerTy upperTy leftBase rightBase
   | leftBase == rightBase = True
-  | rightBase == tNat = (leftBase == tInt || leftBase == tNat) && nonNegativeIntegerBounds lowerTy upperTy
+  | rightBase == tNat =
+      (leftBase == tInt || leftBase == tNat)
+        && nonNegativeIntegerBounds lowerTy upperTy
   | otherwise = subtype leftBase rightBase
 
 -- | Recognize string singleton labels suitable for `Unit`.

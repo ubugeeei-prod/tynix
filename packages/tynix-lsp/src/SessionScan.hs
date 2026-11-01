@@ -154,11 +154,13 @@ tokenize = go [LCode 0] 0
           | c == '#' ->
               let body = Text.takeWhile (/= '\n') txt
                   n = Text.length body
-               in Token KComment body off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+               in Token KComment body off (off + n)
+                    : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | c == '/' && "*" `Text.isPrefixOf` r ->
               let (inside, after) = Text.breakOn "*/" (Text.drop 2 txt)
                   n = 2 + Text.length inside + (if Text.null after then 0 else 2)
-               in Token KComment (Text.take n txt) off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+               in Token KComment (Text.take n txt) off (off + n)
+                    : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | c == '"' ->
               let (len, ending) = scanDouble r
                   n = len + 1
@@ -182,18 +184,22 @@ tokenize = go [LCode 0] 0
                       Token KSymbol "${" (off + n) (off + n + 2)
                         : go (LCode 0 : LIndented : LCode depth : rest) (off + n + 2) (Text.drop 2 after)
           | Just n <- pathLength txt ->
-              Token KPath (Text.take n txt) off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+              Token KPath (Text.take n txt) off (off + n)
+                : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | c == '<',
             Just n <- searchPathLength txt ->
-              Token KPath (Text.take n txt) off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+              Token KPath (Text.take n txt) off (off + n)
+                : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | isDigit c ->
               let n = numberLength txt
-               in Token KNumber (Text.take n txt) off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+               in Token KNumber (Text.take n txt) off (off + n)
+                    : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | identStart c ->
               let word = Text.takeWhile identChar txt
                   n = Text.length word
                   kind = if isHardKeyword word then KKeyword else KIdent
-               in Token kind word off (off + n) : go (LCode depth : rest) (off + n) (Text.drop n txt)
+               in Token kind word off (off + n)
+                    : go (LCode depth : rest) (off + n) (Text.drop n txt)
           | c == '}' ->
               let tok = Token KSymbol "}" off (off + 1)
                in case rest of
@@ -207,8 +213,11 @@ tokenize = go [LCode 0] 0
                 sym : _ ->
                   let n = Text.length sym
                       depth' = if sym == "{" || sym == "${" then depth + 1 else depth
-                   in Token KSymbol sym off (off + n) : go (LCode depth' : rest) (off + n) (Text.drop n txt)
-                [] -> Token KUnknown (Text.singleton c) off (off + 1) : go (LCode depth : rest) (off + 1) r
+                   in Token KSymbol sym off (off + n)
+                        : go (LCode depth' : rest) (off + n) (Text.drop n txt)
+                [] ->
+                  Token KUnknown (Text.singleton c) off (off + 1)
+                    : go (LCode depth : rest) (off + 1) r
 
     isStringMode LDouble = True
     isStringMode LIndented = True
@@ -319,7 +328,9 @@ searchPathLength :: Text -> Maybe Int
 searchPathLength txt =
   let body = Text.takeWhile (\c -> pathChar c || c == '/') (Text.drop 1 txt)
       after = Text.drop (1 + Text.length body) txt
-   in if not (Text.null body) && ">" `Text.isPrefixOf` after && maybe False (isAlpha . fst) (Text.uncons body)
+   in if not (Text.null body)
+        && ">" `Text.isPrefixOf` after
+        && maybe False (isAlpha . fst) (Text.uncons body)
         then Just (Text.length body + 2)
         else Nothing
 
@@ -328,13 +339,16 @@ numberLength txt =
   let intPart = Text.takeWhile isDigit txt
       rest = Text.drop (Text.length intPart) txt
       fracPart = case Text.uncons rest of
-        Just ('.', r) | maybe False (isDigit . fst) (Text.uncons r) -> 1 + Text.length (Text.takeWhile isDigit r)
+        Just ('.', r)
+          | maybe False (isDigit . fst) (Text.uncons r) ->
+              1 + Text.length (Text.takeWhile isDigit r)
         _ -> 0
       rest' = Text.drop fracPart rest
       expPart = case Text.uncons rest' of
         Just (e, r)
           | e == 'e' || e == 'E' ->
-              let signLen = if maybe False ((`elem` ("+-" :: String)) . fst) (Text.uncons r) then 1 else 0
+              let signLen =
+                    if maybe False ((`elem` ("+-" :: String)) . fst) (Text.uncons r) then 1 else 0
                   digits = Text.takeWhile isDigit (Text.drop signLen r)
                in if Text.null digits then 0 else 1 + signLen + Text.length digits
         _ -> 0
@@ -389,9 +403,11 @@ positionToOffset idx (lineNo, column)
   | lineNo < 0 = 0
   | lineNo >= lineCount idx =
       let lastLine = lineCount idx - 1
-       in fromMaybe 0 (Seq.lookup lastLine (lineStartSeq idx)) + Text.length (lineText idx lastLine)
+       in fromMaybe 0 (Seq.lookup lastLine (lineStartSeq idx))
+            + Text.length (lineText idx lastLine)
   | otherwise =
-      fromMaybe 0 (Seq.lookup lineNo (lineStartSeq idx)) + utf16ToChars (lineText idx lineNo) column
+      fromMaybe 0 (Seq.lookup lineNo (lineStartSeq idx))
+        + utf16ToChars (lineText idx lineNo) column
 
 utf16Width :: Text -> Int
 utf16Width = Text.foldl' (\acc c -> acc + if fromEnum c > 0xffff then 2 else 1) 0
@@ -623,7 +639,10 @@ scanDocument content =
           if isSym "(" (s + 1)
             then
               let c = fromMaybe e (closerOf (s + 1))
-               in StmtInherit (Just (s + 1)) [k | k <- [c + 1 .. e - 1], isIdent k || isString k] e
+               in StmtInherit
+                    (Just (s + 1))
+                    [k | k <- [c + 1 .. e - 1], isIdent k || isString k]
+                    e
             else StmtInherit Nothing [k | k <- [s + 1 .. e - 1], isIdent k] e
       | (isIdent s || isString s) && isSym "::" (s + 1) = StmtSig s e
       | Just (path, after) <- attrPath s,
@@ -638,7 +657,9 @@ scanDocument content =
       | otherwise = do
           c <- closerOf i
           if isSym ":" (c + 1)
-            then Just (c + 2, if isSym "@" (i - 1) && isIdent (i - 2) then Just (i - 2) else Nothing)
+            then
+              Just
+                (c + 2, if isSym "@" (i - 1) && isIdent (i - 2) then Just (i - 2) else Nothing)
             else
               if isSym "@" (c + 1) && isIdent (c + 2) && isSym ":" (c + 3)
                 then Just (c + 4, Just (c + 2))
@@ -665,7 +686,9 @@ scanDocument content =
     headerAt k
       | simpleParam k = Just (k, k + 2)
       | Just (body, _) <- patternBody k = Just (k, body)
-      | isIdent k && isSym "@" (k + 1), Just (body, _) <- patternBody (k + 2) = Just (k, body)
+      | isIdent k && isSym "@" (k + 1),
+        Just (body, _) <- patternBody (k + 2) =
+          Just (k, body)
       | Just c <- typedParam k = Just (k, c + 2)
       | otherwise = Nothing
 
@@ -695,7 +718,9 @@ scanDocument content =
                       isIdent j
                     ]
                in topLevel (e + 1) (accB <> (alias : params)) (accT <> Set.fromList [k + 1 .. e])
-          | isIdentNamed "declare" k && (isString (k + 1) || kindAt (k + 1) == Just KPath) && isSym "{" (k + 2) =
+          | isIdentNamed "declare" k
+              && (isString (k + 1) || kindAt (k + 1) == Just KPath)
+              && isSym "{" (k + 2) =
               let c = fromMaybe n (closerOf (k + 2))
                   e = if isSym ";" (c + 1) then c + 1 else c
                in topLevel (e + 1) accB (accT <> Set.fromList [k + 1 .. e])
@@ -723,13 +748,19 @@ scanDocument content =
       where
         step acc i
           | isKw "let" i && not (isSym "{" (i + 1)) = letBlock acc i
-          | isSym "{" i && notPattern i && Set.notMember i declTypeTokens = attrBlock acc i
-          | isIdentNamed "as" i && Set.notMember i declTypeTokens && valueBefore (i - 1) && not (isSym "=" (i + 1)) =
+          | isSym "{" i && notPattern i && Set.notMember i declTypeTokens =
+              attrBlock acc i
+          | isIdentNamed "as" i
+              && Set.notMember i declTypeTokens
+              && valueBefore (i - 1)
+              && not (isSym "=" (i + 1)) =
               acc{accTypes = accTypes acc <> Set.fromList [i + 1 .. bodyEnd (i + 1) - 1]}
           | otherwise = acc
 
     valueBefore j = case at j of
-      Just t -> tokKind t `elem` [KIdent, KString, KNumber, KPath] || tokText t `elem` [")", "}", "]"]
+      Just t ->
+        tokKind t `elem` [KIdent, KString, KNumber, KPath]
+          || tokText t `elem` [")", "}", "]"]
       Nothing -> False
 
     letBlock acc i =
@@ -743,7 +774,9 @@ scanDocument content =
             dedupeFirst
               [ (mkBinder s BindLet scope (startOf s, endOf e))
                   { binderValue = if length path == 1 then Just (eq + 1, e) else Nothing,
-                    binderAnnotation = (\(ss, se) -> slice (endOf (ss + 1)) (startOf se)) <$> Map.lookup (textAt s) sigs,
+                    binderAnnotation =
+                      (\(ss, se) -> slice (endOf (ss + 1)) (startOf se))
+                        <$> Map.lookup (textAt s) sigs,
                     binderSignature = bimap startOf endOf <$> Map.lookup (textAt s) sigs,
                     binderRootLevel = rootLevel
                   }
@@ -784,7 +817,13 @@ scanDocument content =
           sigOnly = not (null [() | StmtSig _ _ <- stmts])
           recBinders =
             if isRec
-              then dedupeFirst [mkBinder s BindRecField scope (startOf s, endOf e) | StmtBind s _ e path <- stmts, length path == 1, isIdent s]
+              then
+                dedupeFirst
+                  [ mkBinder s BindRecField scope (startOf s, endOf e)
+                  | StmtBind s _ e path <- stmts,
+                    length path == 1,
+                    isIdent s
+                  ]
               else []
           owners =
             concat
@@ -828,7 +867,10 @@ scanDocument content =
       | simpleParam i =
           let stop = bodyEnd (i + 2)
               scope = (startOf i, if stop >= n then textLen else startOf stop)
-           in [(mkBinder i BindParam scope (startOf i, endOf (i + 1))){binderOwner = IntMap.lookup i ownerMap}]
+           in [ (mkBinder i BindParam scope (startOf i, endOf (i + 1)))
+                  { binderOwner = IntMap.lookup i ownerMap
+                  }
+              ]
       | Just (body, alias) <- patternBody i =
           let c = fromMaybe n (closerOf i)
               stop = bodyEnd body
@@ -860,7 +902,9 @@ scanDocument content =
               ]
       | otherwise = []
 
-    typedParamTypes = Set.fromList (concat [[i + 3 .. c - 1] | i <- [0 .. n - 1], Just c <- [typedParam i]])
+    typedParamTypes =
+      Set.fromList
+        (concat [[i + 3 .. c - 1] | i <- [0 .. n - 1], Just c <- [typedParam i]])
     typeTokens = typeTokens0 <> typedParamTypes
 
     splitElements a b = go a
@@ -877,7 +921,12 @@ scanDocument content =
           | otherwise = elementEnd (i + 1)
 
     patternDefaultStarts =
-      Set.fromList [s | b <- lambdaBinders, binderKind b == BindPatternField, Just (s, _) <- [binderValue b]]
+      Set.fromList
+        [ s
+        | b <- lambdaBinders,
+          binderKind b == BindPatternField,
+          Just (s, _) <- [binderValue b]
+        ]
 
     mkBinder k kind (scopeStart, scopeEnd) (declStart, declEnd) =
       Binder
@@ -919,7 +968,13 @@ scanDocument content =
       [ (i, binderToken b)
       | i <- referenceIdx,
         Just t <- [at i],
-        Just b <- [resolveIn byName (tokText t) (tokStart t) (if Set.member i outerRefs then Just i else Nothing)]
+        Just b <-
+          [ resolveIn
+              byName
+              (tokText t)
+              (tokStart t)
+              (if Set.member i outerRefs then Just i else Nothing)
+          ]
       ]
     resolved = IntMap.fromList resolvedPairs
     usage = IntMap.fromListWith (+) [(b, 1 :: Int) | (_, b) <- resolvedPairs]
@@ -931,7 +986,12 @@ scanDocument content =
           tokKind t == KComment,
           "#" `Text.isPrefixOf` tokText t,
           let lineNo = lineOfOffset lineIndex (tokStart t),
-          Text.all isSpace (Text.take (tokStart t - positionToOffset lineIndex (lineNo, 0)) (lineText lineIndex lineNo))
+          Text.all
+            isSpace
+            ( Text.take
+                (tokStart t - positionToOffset lineIndex (lineNo, 0))
+                (lineText lineIndex lineNo)
+            )
         ]
 
 dedupeFirst :: [Binder] -> [Binder]
@@ -950,7 +1010,8 @@ matchBrackets code = go (0 :: Int) [] IntMap.empty (toList code)
     go _ _ acc [] = acc
     go i stack acc (t : ts)
       | tokKind t /= KSymbol = go (i + 1) stack acc ts
-      | tokText t `elem` ["{", "(", "[", "${"] = go (i + 1) ((i, tokText t) : stack) acc ts
+      | tokText t `elem` ["{", "(", "[", "${"] =
+          go (i + 1) ((i, tokText t) : stack) acc ts
       | tokText t `elem` ["}", ")", "]"] =
           case break (compatible (tokText t) . snd) stack of
             (_, (o, _) : rest) -> go (i + 1) rest (IntMap.insert o i (IntMap.insert i o acc)) ts
@@ -1012,7 +1073,8 @@ unusedBinders :: Scan -> [Binder]
 unusedBinders scan =
   [ b
   | b <- scanBinders scan,
-    binderKind b `elem` [BindLet, BindInherit, BindParam, BindPatternField, BindPatternAlias],
+    binderKind b
+      `elem` [BindLet, BindInherit, BindParam, BindPatternField, BindPatternAlias],
     not ("_" `Text.isPrefixOf` binderName b),
     IntMap.findWithDefault 0 (binderToken b) (scanUsage scan) == 0
   ]
@@ -1060,7 +1122,8 @@ enclosingOpeners scan off = go (0 :: Int) [] (toList (scanCode scan))
     go _ stack [] = stack
     go i stack (t : ts)
       | tokStart t >= off = stack
-      | tokKind t == KSymbol && tokText t `elem` ["{", "(", "[", "${"] = go (i + 1) (i : stack) ts
+      | tokKind t == KSymbol && tokText t `elem` ["{", "(", "[", "${"] =
+          go (i + 1) (i : stack) ts
       | tokKind t == KSymbol && tokText t `elem` ["}", ")", "]"] =
           case IntMap.lookup i (scanMatches scan) of
             Just o | o `elem` stack -> go (i + 1) (drop 1 (dropWhile (/= o) stack)) ts
@@ -1075,11 +1138,17 @@ insideCommentOrString :: Scan -> Int -> Bool
 insideCommentOrString scan off = any inside (scanAllTokens scan)
   where
     inside t = case tokKind t of
-      KComment -> tokStart t < off && (off < tokEnd t || (off == tokEnd t && "#" `Text.isPrefixOf` tokText t))
-      KString -> tokStart t < off && (off < tokEnd t || (off == tokEnd t && not (closedString (tokText t))))
+      KComment ->
+        tokStart t < off
+          && (off < tokEnd t || (off == tokEnd t && "#" `Text.isPrefixOf` tokText t))
+      KString ->
+        tokStart t < off
+          && (off < tokEnd t || (off == tokEnd t && not (closedString (tokText t))))
       _ -> False
     closedString s =
-      (Text.length s >= 2 && ("\"" `Text.isSuffixOf` s && not ("\\\"" `Text.isSuffixOf` s)))
+      ( Text.length s >= 2
+          && ("\"" `Text.isSuffixOf` s && not ("\\\"" `Text.isSuffixOf` s))
+      )
         || (Text.length s >= 4 && "''" `Text.isSuffixOf` s)
 
 rootAttrsetOpener :: Scan -> Maybe Int

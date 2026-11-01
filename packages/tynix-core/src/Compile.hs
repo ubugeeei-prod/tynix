@@ -16,7 +16,10 @@ compileProgram = renderProgramAsNix . eraseProgram
 eraseProgram :: Program -> Program
 eraseProgram program =
   program
-    { programExpr = fmap (\marked -> marked{markedValue = eraseExpr (markedValue marked)}) (programExpr program)
+    { programExpr =
+        fmap
+          (\marked -> marked{markedValue = eraseExpr (markedValue marked)})
+          (programExpr program)
     }
 
 eraseExpr :: Expr -> Expr
@@ -26,7 +29,10 @@ eraseExpr expr =
     EApp fun arg -> EApp (eraseExpr fun) (eraseExpr arg)
     EBinaryOp op left right -> EBinaryOp op (eraseExpr left) (eraseExpr right)
     EUnaryOp op operand -> EUnaryOp op (eraseExpr operand)
-    ELet items body -> ELet [eraseMarkedLetItem item | item <- items, isLetBinding (markedValue item)] (eraseExpr body)
+    ELet items body ->
+      ELet
+        [eraseMarkedLetItem item | item <- items, isLetBinding (markedValue item)]
+        (eraseExpr body)
     EAttrSet items -> EAttrSet (map eraseAttrItem items)
     ERec items -> ERec (map eraseAttrItem items)
     ESelect base fields -> ESelect (eraseExpr base) (map eraseSelectStep fields)
@@ -51,7 +57,12 @@ erasePattern :: Pattern -> Pattern
 erasePattern (PVar name _) = PVar name Nothing
 erasePattern (PAttrSet fields open binder) =
   PAttrSet
-    [field{patternFieldType = Nothing, patternFieldDefault = eraseExpr <$> patternFieldDefault field} | field <- fields]
+    [ field
+        { patternFieldType = Nothing,
+          patternFieldDefault = eraseExpr <$> patternFieldDefault field
+        }
+    | field <- fields
+    ]
     open
     binder
 

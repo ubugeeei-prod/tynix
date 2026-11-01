@@ -16,7 +16,14 @@ import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Pretty (renderDeclarationFile)
 import Syntax
-import System.FilePath (isRelative, joinPath, normalise, replaceExtension, splitDirectories, takeDirectory)
+import System.FilePath
+  ( isRelative,
+    joinPath,
+    normalise,
+    replaceExtension,
+    splitDirectories,
+    takeDirectory,
+  )
 import Type
 
 -- | Emit a `.d.tynix`-style declaration text for a source file.
@@ -25,14 +32,22 @@ import Type
 -- abstractions rather than only seeing fully-expanded record shapes.
 emitDeclarationFile :: FilePath -> Program -> Scheme -> Text
 emitDeclarationFile source =
-  emitDeclarationFileFor (replaceExtension source "nix") (replaceExtension source "d.tynix")
+  emitDeclarationFileFor
+    (replaceExtension source "nix")
+    (replaceExtension source "d.tynix")
 
 emitDeclarationFileFor :: FilePath -> FilePath -> Program -> Scheme -> Text
 emitDeclarationFileFor runtimeTarget declarationPath program scheme =
-  renderDeclarationFile (declareTarget runtimeTarget declarationPath) (programAliases program) entries
+  renderDeclarationFile
+    (declareTarget runtimeTarget declarationPath)
+    (programAliases program)
+    entries
   where
     entries =
-      case (stripCasts . markedValue <$> programExpr program, schemeType scheme, schemeVars scheme) of
+      case ( stripCasts . markedValue <$> programExpr program,
+             schemeType scheme,
+             schemeVars scheme
+           ) of
         (Just (EAttrSet _), TRecord fields, []) -> Map.toList fields
         (Just (ERec _), TRecord fields, []) -> Map.toList fields
         _ -> [("default", quantified)]
@@ -43,8 +58,12 @@ emitDeclarationFileFor runtimeTarget declarationPath program scheme =
 
 declareTarget :: FilePath -> FilePath -> FilePath
 declareTarget runtimeTarget declarationPath =
-  let relativePath = relativeBetween (normalise (takeDirectory declarationPath)) (normalise runtimeTarget)
-   in if isRelative relativePath && not ("./" `isPrefixOf` relativePath || "../" `isPrefixOf` relativePath)
+  let relativePath =
+        relativeBetween
+          (normalise (takeDirectory declarationPath))
+          (normalise runtimeTarget)
+   in if isRelative relativePath
+        && not ("./" `isPrefixOf` relativePath || "../" `isPrefixOf` relativePath)
         then "./" <> relativePath
         else relativePath
 

@@ -8,12 +8,26 @@ import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
-import Driver (compileFile, compileText, emitFile, emitFileTo, emitText, parseText)
+import Driver
+  ( compileFile,
+    compileText,
+    emitFile,
+    emitFileTo,
+    emitText,
+    parseText,
+  )
 import Parser (parseProgram)
 import Syntax
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (expectLeftContaining, expectRight, fixturePathCandidates, source, withCopiedFixtureTree, withTempTree)
+import TestSupport
+  ( expectLeftContaining,
+    expectRight,
+    fixturePathCandidates,
+    source,
+    withCopiedFixtureTree,
+    withTempTree,
+  )
 import Type
 
 main :: IO ()
@@ -66,7 +80,8 @@ spec = describe "compile and emit" $ do
         )
 
   it "refuses to compile declaration-only sources" $
-    compileText "types.d.tynix" "declare \"./lib.nix\" { default :: Int; };" >>= (`expectLeftContaining` "declaration-only")
+    compileText "types.d.tynix" "declare \"./lib.nix\" { default :: Int; };"
+      >>= (`expectLeftContaining` "declaration-only")
 
   it "erases nested annotations while preserving nix control flow and inherit" $ do
     output <-
@@ -200,7 +215,8 @@ spec = describe "compile and emit" $ do
     "rec {" `Text.isInfixOf` output `shouldBe` True
 
   it "emits field-wise declarations for attrset roots" $ do
-    output <- emitText "main.tynix" "{ name = \"tynix\"; count = 1; }" >>= expectRight
+    output <-
+      emitText "main.tynix" "{ name = \"tynix\"; count = 1; }" >>= expectRight
     program <- expectRight (parseDecl "main.d.tynix" output)
     programAmbient program
       `shouldBe` [ AmbientDecl
@@ -211,7 +227,8 @@ spec = describe "compile and emit" $ do
                  ]
 
   it "matches the exact emitted declaration text for record roots" $ do
-    output <- emitText "main.tynix" "{ name = \"tynix\"; count = 1; }" >>= expectRight
+    output <-
+      emitText "main.tynix" "{ name = \"tynix\"; count = 1; }" >>= expectRight
     output
       `shouldBe` Text.stripEnd
         ( source
@@ -224,7 +241,8 @@ spec = describe "compile and emit" $ do
 
   it "emits cast-asserted root types while preserving record-shaped exports" $ do
     scalarOutput <- emitText "main.tynix" "1 as Number" >>= expectRight
-    recordOutput <- emitText "main.tynix" "{ value = 1; } as { value :: Int; }" >>= expectRight
+    recordOutput <-
+      emitText "main.tynix" "{ value = 1; } as { value :: Int; }" >>= expectRight
     Text.isInfixOf "default :: Number;" scalarOutput `shouldBe` True
     Text.isInfixOf "default ::" recordOutput `shouldBe` False
     Text.isInfixOf "value :: Int;" recordOutput `shouldBe` True
@@ -365,9 +383,14 @@ spec = describe "compile and emit" $ do
         )
 
   it "preserves aliases when emitting declaration files" $ do
-    output <- emitText "main.tynix" "type Box t = { value :: t; }; { boxed = { value = 1; }; }" >>= expectRight
+    output <-
+      emitText
+        "main.tynix"
+        "type Box t = { value :: t; }; { boxed = { value = 1; }; }"
+        >>= expectRight
     program <- expectRight (parseDecl "main.d.tynix" output)
-    programAliases program `shouldBe` [plainAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
+    programAliases program
+      `shouldBe` [plainAlias "Box" ["t"] (TRecord (Map.fromList [("value", TVar "t")]))]
 
   it "emits indexed container roots with their inferred shapes" $ do
     output <- emitText "main.tynix" "[[1 2] [3 4]]" >>= expectRight
@@ -377,7 +400,10 @@ spec = describe "compile and emit" $ do
                      "./main.nix"
                      [ AmbientEntry
                          "default"
-                         (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 2))) (TUnion [TLit (LInt 1), TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)]))
+                         ( TApp
+                             (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 2)))
+                             (TUnion [TLit (LInt 1), TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)])
+                         )
                      ]
                  ]
 
@@ -387,7 +413,10 @@ spec = describe "compile and emit" $ do
     programAmbient program
       `shouldBe` [ AmbientDecl
                      "./main.nix"
-                     [AmbientEntry "default" (TApp (TCon "Tuple") (TTypeList [TLit (LInt 1), TLit (LString "x")]))]
+                     [ AmbientEntry
+                         "default"
+                         (TApp (TCon "Tuple") (TTypeList [TLit (LInt 1), TLit (LString "x")]))
+                     ]
                  ]
 
   it "round-trips higher-rank tensor declarations through the emitter" $ do
@@ -398,13 +427,17 @@ spec = describe "compile and emit" $ do
                      "./main.nix"
                      [ AmbientEntry
                          "default"
-                         (TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 2), TLit (LInt 1)])) (TUnion [TLit (LInt 1), TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)]))
+                         ( TApp
+                             (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 2), TLit (LInt 1)]))
+                             (TUnion [TLit (LInt 1), TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)])
+                         )
                      ]
                  ]
 
   it "emits ragged nested list roots as structural list declarations" $ do
     output <- emitText "main.tynix" "[[1] [2 3]]" >>= expectRight
-    Text.isInfixOf "default :: List (Vec (1 | 2) (1 | 2 | 3));" output `shouldBe` True
+    Text.isInfixOf "default :: List (Vec (1 | 2) (1 | 2 | 3));" output
+      `shouldBe` True
 
   it "emits linear function arrows in declaration output" $ do
     output <-
@@ -432,7 +465,8 @@ spec = describe "compile and emit" $ do
             ]
         )
         >>= expectRight
-    Text.isInfixOf "default :: Unit \"ms\" (Range 0 5000 Nat);" output `shouldBe` True
+    Text.isInfixOf "default :: Unit \"ms\" (Range 0 5000 Nat);" output
+      `shouldBe` True
 
   it "emits any and unknown annotations distinctly" $ do
     anyOutput <-
@@ -476,19 +510,21 @@ spec = describe "compile and emit" $ do
     "Range" `Text.isInfixOf` output `shouldBe` False
     "timeout = 2500;" `Text.isInfixOf` output `shouldBe` True
 
-  it "emits bounded indexed annotations without erasing dependent shape constraints" $ do
-    output <-
-      emitText
-        "main.tynix"
-        ( source
-            [ "let",
-              "  grid :: Matrix (Range 1 2 Nat) 2 Int;",
-              "  grid = [[1 2] [3 4]];",
-              "in grid"
-            ]
-        )
-        >>= expectRight
-    Text.isInfixOf "default :: Matrix (Range 1 2 Nat) 2 Int;" output `shouldBe` True
+  it
+    "emits bounded indexed annotations without erasing dependent shape constraints"
+    $ do
+      output <-
+        emitText
+          "main.tynix"
+          ( source
+              [ "let",
+                "  grid :: Matrix (Range 1 2 Nat) 2 Int;",
+                "  grid = [[1 2] [3 4]];",
+                "in grid"
+              ]
+          )
+          >>= expectRight
+      Text.isInfixOf "default :: Matrix (Range 1 2 Nat) 2 Int;" output `shouldBe` True
 
   it "emits exact-zero and refined tensor annotations precisely" $ do
     zeroOutput <-
@@ -514,7 +550,8 @@ spec = describe "compile and emit" $ do
         )
         >>= expectRight
     Text.isInfixOf "default :: Vec (Range 0 0 Nat) Int;" zeroOutput `shouldBe` True
-    Text.isInfixOf "default :: Tensor [ 2 (Range 1 2 Nat) 1 ] Int;" tensorOutput `shouldBe` True
+    Text.isInfixOf "default :: Tensor [ 2 (Range 1 2 Nat) 1 ] Int;" tensorOutput
+      `shouldBe` True
 
   it "emits float-based numeric validators in declaration output" $ do
     output <-
@@ -538,7 +575,9 @@ spec = describe "compile and emit" $ do
     withTempTree
       [("src/main.tynix", "1")]
       ( \root -> do
-          output <- emitFileTo (root <> "/src/main.tynix") (root <> "/types/generated/main.d.tynix") >>= expectRight
+          output <-
+            emitFileTo (root <> "/src/main.tynix") (root <> "/types/generated/main.d.tynix")
+              >>= expectRight
           Text.isInfixOf "declare \"../../src/main.nix\"" output `shouldBe` True
       )
 
@@ -565,7 +604,12 @@ expectCompileFixedPoint (label, input) = do
   twice <- compileOrFail (label <> " (second pass)") once
   when (twice /= once) $
     expectationFailure
-      (label <> ": compiling twice changed the output\nfirst:\n" <> Text.unpack once <> "\nsecond:\n" <> Text.unpack twice)
+      ( label
+          <> ": compiling twice changed the output\nfirst:\n"
+          <> Text.unpack once
+          <> "\nsecond:\n"
+          <> Text.unpack twice
+      )
 
 expectNoTypeSyntax :: (String, Text) -> Expectation
 expectNoTypeSyntax (label, input) = do
@@ -573,37 +617,71 @@ expectNoTypeSyntax (label, input) = do
   mapM_
     ( \needle ->
         when (needle `Text.isInfixOf` compiled) $
-          expectationFailure (label <> ": compiled output still contains " <> show needle <> "\n" <> Text.unpack compiled)
+          expectationFailure
+            ( label
+                <> ": compiled output still contains "
+                <> show needle
+                <> "\n"
+                <> Text.unpack compiled
+            )
     )
     [" :: ", "type ", "declare ", " as "]
 
 compileOrFail :: String -> Text -> IO Text
 compileOrFail label input =
   case parseProgram "corpus.tynix" input of
-    Left err -> expectationFailure (label <> ": parse failed: " <> Text.unpack err) >> fail "parse failed"
+    Left err ->
+      expectationFailure (label <> ": parse failed: " <> Text.unpack err)
+        >> fail "parse failed"
     Right program ->
       case compileProgram program of
-        Left err -> expectationFailure (label <> ": compile failed: " <> Text.unpack err) >> fail "compile failed"
+        Left err ->
+          expectationFailure (label <> ": compile failed: " <> Text.unpack err)
+            >> fail "compile failed"
         Right compiled -> pure compiled
 
 -- | Sources chosen to cover the executable grammar, with the type-only syntax
 -- that has to be erased woven through them.
 compileCorpus :: [(String, Text)]
 compileCorpus =
-  [ ("literals", "{ int = 1; float = 1.5; neg = -2; str = \"a\"; nul = null; yes = true; }"),
-    ("escaped strings", "{ quote = \"say \\\"hi\\\"\"; slash = \"a\\\\b\"; dollar = \"a\\${b}\"; }"),
-    ("indented string", source ["{", "  hook = ''", "    echo 'go'", "    export DIR=\"$HOME\"", "  '';", "}"]),
-    ("nested indented string", source ["{", "  outer = {", "    hook = ''", "      line one", "      line two", "    '';", "  };", "}"]),
+  [ ( "literals",
+      "{ int = 1; float = 1.5; neg = -2; str = \"a\"; nul = null; yes = true; }"
+    ),
+    ( "escaped strings",
+      "{ quote = \"say \\\"hi\\\"\"; slash = \"a\\\\b\"; dollar = \"a\\${b}\"; }"
+    ),
+    ( "indented string",
+      source
+        ["{", "  hook = ''", "    echo 'go'", "    export DIR=\"$HOME\"", "  '';", "}"]
+    ),
+    ( "nested indented string",
+      source
+        [ "{",
+          "  outer = {",
+          "    hook = ''",
+          "      line one",
+          "      line two",
+          "    '';",
+          "  };",
+          "}"
+        ]
+    ),
     ("interpolation", "let name = \"world\"; in \"hello ${name} and ${\"more\"}\""),
-    ("indented interpolation", source ["let name = \"x\";", "in ''", "  value ${name}", "''"]),
+    ( "indented interpolation",
+      source ["let name = \"x\";", "in ''", "  value ${name}", "''"]
+    ),
     ("lambdas and application", "let add = a: b: a + b; in add 1 2"),
     ("annotated lambdas", "let f :: Int -> Int; f = (x :: Int): x + 1; in f 1"),
     ("attrset patterns", "{ self, nixpkgs, ... }: { inherit self; }"),
     ("operators", "let a = 1; b = 2; in (a + b) * 3 - 4 == 5 && !(a < b) || a >= b"),
-    ("concat and update", "{ xs = [ 1 2 ] ++ [ 3 ]; merged = { a = 1; } // { b = 2; }; }"),
+    ( "concat and update",
+      "{ xs = [ 1 2 ] ++ [ 3 ]; merged = { a = 1; } // { b = 2; }; }"
+    ),
     ("has-attr", "let r = { a = 1; }; in r ? a"),
     ("control flow", "if 1 < 2 then (assert true; 1) else (with { x = 1; }; x)"),
-    ("rec and inherit", "let outer = 1; in rec { inner = outer; alias = inner; inherit outer; }"),
+    ( "rec and inherit",
+      "let outer = 1; in rec { inner = outer; alias = inner; inherit outer; }"
+    ),
     ("selections", "let r = { a = { b = 1; }; }; k = \"a\"; in [ r.a.b r.${k} ]"),
     ("quoted attribute names", "{ \"with space\" = 1; \"0lead\" = 2; }"),
     ("paths", "{ here = ./lib.nix; up = ../shared.nix; root = /etc/hosts; }"),

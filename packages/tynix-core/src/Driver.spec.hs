@@ -6,7 +6,15 @@ module Main (main) where
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
-import Driver (Analysis (..), analyzeFile, analyzeFileWith, analyzeText, compileFile, emitFile, newSupportCache)
+import Driver
+  ( Analysis (..),
+    analyzeFile,
+    analyzeFileWith,
+    analyzeText,
+    compileFile,
+    emitFile,
+    newSupportCache,
+  )
 import Pretty (renderScheme)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -63,11 +71,15 @@ spec = describe "analysis" $ do
     fmap renderScheme (analysisRoot analysis) `shouldBe` Just "forall t0. t0 -> t0"
 
   it "follows structural field selections" $ do
-    analysis <- analyzeText "main.tynix" "{ nested = { value = 1; }; }.nested.value" >>= expectRight
+    analysis <-
+      analyzeText "main.tynix" "{ nested = { value = 1; }; }.nested.value"
+        >>= expectRight
     analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
 
   it "follows quoted field selections" $ do
-    analysis <- analyzeText "main.tynix" "{ \"aarch64-darwin\" = 1; }.\"aarch64-darwin\"" >>= expectRight
+    analysis <-
+      analyzeText "main.tynix" "{ \"aarch64-darwin\" = 1; }.\"aarch64-darwin\""
+        >>= expectRight
     analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
 
   it "joins dynamic field selections from string literal unions" $ do
@@ -83,51 +95,82 @@ spec = describe "analysis" $ do
             ]
         )
         >>= expectRight
-    analysisRoot analysis `shouldBe` Just (Scheme [] (TUnion [TLit (LInt 1), TLit (LInt 2)]))
+    analysisRoot analysis
+      `shouldBe` Just (Scheme [] (TUnion [TLit (LInt 1), TLit (LInt 2)]))
 
   it "infers attrset lambda binders used in flake outputs" $ do
-    analysis <- analyzeText "main.tynix" "{ self, nixpkgs, ... }: self" >>= expectRight
+    analysis <-
+      analyzeText "main.tynix" "{ self, nixpkgs, ... }: self" >>= expectRight
     fmap renderScheme (analysisRoot analysis)
       `shouldBe` Just "forall t0 t1. {\n  nixpkgs :: t1;\n  self :: t0;\n  ...\n} -> t0"
 
   it "counts mutually exclusive if branches once for lambda multiplicity" $ do
     analysis <- analyzeText "main.tynix" "x: if true then x else x" >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "forall t0. t0 %1 -> t0"
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "forall t0. t0 %1 -> t0"
 
   it "infers numeric results for subtraction and multiplication" $ do
     mul <- analyzeText "math.nix" "{ area = w: h: w * h; }" >>= expectRight
     plainRoot mul
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("area", TFun Many tNumber (TFun One tNumber tNumber))])))
+      `shouldBe` Just
+        ( Scheme
+            []
+            (TRecord (Map.fromList [("area", TFun Many tNumber (TFun One tNumber tNumber))]))
+        )
     sub <- analyzeText "math.nix" "{ diff = a: b: a - b; }" >>= expectRight
     plainRoot sub
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun Many tNumber (TFun One tNumber tNumber))])))
+      `shouldBe` Just
+        ( Scheme
+            []
+            (TRecord (Map.fromList [("diff", TFun Many tNumber (TFun One tNumber tNumber))]))
+        )
 
   it "widens Nat-only subtraction to Int" $ do
-    analysis <- analyzeText "main.nix" "{ diff = (a :: Nat): (b :: Nat): a - b; }" >>= expectRight
+    analysis <-
+      analyzeText "main.nix" "{ diff = (a :: Nat): (b :: Nat): a - b; }"
+        >>= expectRight
     plainRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("diff", TFun Many tNat (TFun One tNat tInt))])))
+      `shouldBe` Just
+        ( Scheme
+            []
+            (TRecord (Map.fromList [("diff", TFun Many tNat (TFun One tNat tInt))]))
+        )
 
   it "concatenates annotated lists into a joined list element type" $ do
-    analysis <- analyzeText "main.nix" "{ cat = (xs :: List Int): (ys :: List Int): xs ++ ys; }" >>= expectRight
+    analysis <-
+      analyzeText "main.nix" "{ cat = (xs :: List Int): (ys :: List Int): xs ++ ys; }"
+        >>= expectRight
     plainRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("cat", TFun Many (tList tInt) (TFun One (tList tInt) (tList tInt)))])))
+      `shouldBe` Just
+        ( Scheme
+            []
+            ( TRecord
+                ( Map.fromList
+                    [("cat", TFun Many (tList tInt) (TFun One (tList tInt) (tList tInt)))]
+                )
+            )
+        )
 
   it "concatenates list literals into a structural list" $ do
     analysis <- analyzeText "main.tynix" "[1 2] ++ [3 4]" >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldSatisfy` maybe False (Text.isInfixOf "List")
+    fmap renderScheme (analysisRoot analysis)
+      `shouldSatisfy` maybe False (Text.isInfixOf "List")
 
   it "rejects concatenating non-list operands" $
-    analyzeText "main.tynix" "1 ++ 2" >>= (`expectLeftContaining` "cannot concatenate")
+    analyzeText "main.tynix" "1 ++ 2"
+      >>= (`expectLeftContaining` "cannot concatenate")
 
   it "infers recursive attribute sets where fields reference each other" $ do
     analysis <- analyzeText "main.tynix" "rec { a = 1; b = a; }" >>= expectRight
     analysisRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 1)), ("b", TLit (LInt 1))])))
+      `shouldBe` Just
+        (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 1)), ("b", TLit (LInt 1))])))
 
   it "resolves forward references inside a recursive attribute set" $ do
     analysis <- analyzeText "main.tynix" "rec { b = a; a = 1; }" >>= expectRight
     analysisRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 1)), ("b", TLit (LInt 1))])))
+      `shouldBe` Just
+        (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 1)), ("b", TLit (LInt 1))])))
 
   it "types attribute-presence tests as Bool regardless of field presence" $ do
     present <- analyzeText "main.tynix" "{ a = 1; } ? a" >>= expectRight
@@ -140,12 +183,15 @@ spec = describe "analysis" $ do
     analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
 
   it "rejects an assert whose condition is not Bool" $
-    analyzeText "main.tynix" "assert 1; 2" >>= (`expectLeftContaining` "type mismatch")
+    analyzeText "main.tynix" "assert 1; 2"
+      >>= (`expectLeftContaining` "type mismatch")
 
   it "merges attribute sets with the update operator, right side overriding" $ do
-    analysis <- analyzeText "main.tynix" "{ a = 1; } // { a = 2; b = 3; }" >>= expectRight
+    analysis <-
+      analyzeText "main.tynix" "{ a = 1; } // { a = 2; b = 3; }" >>= expectRight
     analysisRoot analysis
-      `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 2)), ("b", TLit (LInt 3))])))
+      `shouldBe` Just
+        (Scheme [] (TRecord (Map.fromList [("a", TLit (LInt 2)), ("b", TLit (LInt 3))])))
 
   it "rejects updating non-record operands" $
     analyzeText "main.tynix" "1 // 2" >>= (`expectLeftContaining` "cannot update")
@@ -165,35 +211,46 @@ spec = describe "analysis" $ do
     analysisRoot cmp `shouldBe` Just (Scheme [] tBool)
 
   it "rejects comparing non-comparable operands" $
-    analyzeText "main.tynix" "true < false" >>= (`expectLeftContaining` "cannot compare")
+    analyzeText "main.tynix" "true < false"
+      >>= (`expectLeftContaining` "cannot compare")
 
   it "rejects boolean connectives applied to non-boolean operands" $
-    analyzeText "main.tynix" "1 && true" >>= (`expectLeftContaining` "type mismatch")
+    analyzeText "main.tynix" "1 && true"
+      >>= (`expectLeftContaining` "type mismatch")
 
   it "types interpolated strings as String and checks embedded expressions" $ do
-    analysis <- analyzeText "main.tynix" "let name = \"x\"; in \"hi ${name}\"" >>= expectRight
+    analysis <-
+      analyzeText "main.tynix" "let name = \"x\"; in \"hi ${name}\"" >>= expectRight
     analysisRoot analysis `shouldBe` Just (Scheme [] tString)
 
   it "reports unbound names used inside interpolation" $
-    analyzeText "main.tynix" "\"value is ${missing}\"" >>= (`expectLeftContaining` "unbound name")
+    analyzeText "main.tynix" "\"value is ${missing}\""
+      >>= (`expectLeftContaining` "unbound name")
 
   it "brings a record scope's fields into scope with `with`" $ do
     analysis <- analyzeText "main.tynix" "with { a = 1; }; a" >>= expectRight
     analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
 
   it "still reports names absent from a known `with` record scope" $
-    analyzeText "main.tynix" "with { a = 1; }; b" >>= (`expectLeftContaining` "unbound name")
+    analyzeText "main.tynix" "with { a = 1; }; b"
+      >>= (`expectLeftContaining` "unbound name")
 
   it "stays lenient for names resolved through a gradual `with` scope" $ do
-    analysis <- analyzeText "main.tynix" "(pkgs :: dynamic): with pkgs; somePackage" >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldSatisfy` maybe False ("dynamic" `Text.isInfixOf`)
+    analysis <-
+      analyzeText "main.tynix" "(pkgs :: dynamic): with pkgs; somePackage"
+        >>= expectRight
+    fmap renderScheme (analysisRoot analysis)
+      `shouldSatisfy` maybe False ("dynamic" `Text.isInfixOf`)
 
   it "reports missing fields" $
-    analyzeText "main.tynix" "{ value = 1; }.missing" >>= (`expectLeftContaining` "missing field")
+    analyzeText "main.tynix" "{ value = 1; }.missing"
+      >>= (`expectLeftContaining` "missing field")
 
   it "rejects applying a concrete non-function value" $ do
-    analyzeText "main.tynix" "1 2" >>= (`expectLeftContaining` "cannot call an integer as a function")
-    analyzeText "main.tynix" "{ x = 1; } 2" >>= (`expectLeftContaining` "cannot call an attribute set as a function")
+    analyzeText "main.tynix" "1 2"
+      >>= (`expectLeftContaining` "cannot call an integer as a function")
+    analyzeText "main.tynix" "{ x = 1; } 2"
+      >>= (`expectLeftContaining` "cannot call an attribute set as a function")
 
   it "renders diagnostics with surface syntax and no raw AST constructors" $ do
     let assertHumanReadable input needle =
@@ -235,9 +292,12 @@ spec = describe "analysis" $ do
     analyzeText "main.tynix" "missing" >>= (`expectLeftContaining` "unbound name")
 
   it "reports filesystem read failures as ordinary errors" $ do
-    analyzeFile "/tmp/tynix-does-not-exist/main.tynix" >>= (`expectLeftContaining` "failed to read")
-    compileFile "/tmp/tynix-does-not-exist/main.tynix" >>= (`expectLeftContaining` "failed to read")
-    emitFile "/tmp/tynix-does-not-exist/main.tynix" >>= (`expectLeftContaining` "failed to read")
+    analyzeFile "/tmp/tynix-does-not-exist/main.tynix"
+      >>= (`expectLeftContaining` "failed to read")
+    compileFile "/tmp/tynix-does-not-exist/main.tynix"
+      >>= (`expectLeftContaining` "failed to read")
+    emitFile "/tmp/tynix-does-not-exist/main.tynix"
+      >>= (`expectLeftContaining` "failed to read")
 
   it "infers exact vector roots while preserving precise element unions" $ do
     analysis <- analyzeText "main.tynix" "[1 2]" >>= expectRight
@@ -253,13 +313,17 @@ spec = describe "analysis" $ do
 
   it "infers matrix and tensor roots from nested list literals" $ do
     matrixAnalysis <- analyzeText "main.tynix" "[[1 2] [3 4]]" >>= expectRight
-    tensorAnalysis <- analyzeText "main.tynix" "[[[1] [2]] [[3] [4]]]" >>= expectRight
-    fmap renderScheme (analysisRoot matrixAnalysis) `shouldBe` Just "Matrix 2 2 (1 | 2 | 3 | 4)"
-    fmap renderScheme (analysisRoot tensorAnalysis) `shouldBe` Just "Tensor [ 2 2 1 ] (1 | 2 | 3 | 4)"
+    tensorAnalysis <-
+      analyzeText "main.tynix" "[[[1] [2]] [[3] [4]]]" >>= expectRight
+    fmap renderScheme (analysisRoot matrixAnalysis)
+      `shouldBe` Just "Matrix 2 2 (1 | 2 | 3 | 4)"
+    fmap renderScheme (analysisRoot tensorAnalysis)
+      `shouldBe` Just "Tensor [ 2 2 1 ] (1 | 2 | 3 | 4)"
 
   it "preserves ragged nested list roots as structural lists of vectors" $ do
     analysis <- analyzeText "main.tynix" "[[1] [2 3]]" >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "List (Vec (1 | 2) (1 | 2 | 3))"
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "List (Vec (1 | 2) (1 | 2 | 3))"
 
   it "uses inline ambient declarations for imports" $ do
     analysis <-
@@ -311,7 +375,9 @@ spec = describe "analysis" $ do
               "};"
             ]
         ),
-        ("app/main.tynix", "let sum = builtins.add 1 2; first = builtins.head [1 2]; in { inherit sum first; }")
+        ( "app/main.tynix",
+          "let sum = builtins.add 1 2; first = builtins.head [1 2]; in { inherit sum first; }"
+        )
       ]
       ( \root -> do
           analysis <- analyzeFile (root <> "/app/main.tynix") >>= expectRight
@@ -348,15 +414,24 @@ spec = describe "analysis" $ do
 
   it "checks Vec, Matrix, and Tensor annotations against list literals" $ do
     vectorAnalysis <-
-      analyzeText "main.tynix" (source ["let xs :: Vec 3 Int;", "    xs = [1 2 3];", "in xs"])
+      analyzeText
+        "main.tynix"
+        (source ["let xs :: Vec 3 Int;", "    xs = [1 2 3];", "in xs"])
         >>= expectRight
     matrixAnalysis <-
-      analyzeText "main.tynix" (source ["let grid :: Matrix 2 2 Int;", "    grid = [[1 2] [3 4]];", "in grid"])
+      analyzeText
+        "main.tynix"
+        (source ["let grid :: Matrix 2 2 Int;", "    grid = [[1 2] [3 4]];", "in grid"])
         >>= expectRight
     tensorAnalysis <-
       analyzeText
         "main.tynix"
-        (source ["let cube :: Tensor [2 2 1] Int;", "    cube = [[[1] [2]] [[3] [4]]];", "in cube"])
+        ( source
+            [ "let cube :: Tensor [2 2 1] Int;",
+              "    cube = [[[1] [2]] [[3] [4]]];",
+              "in cube"
+            ]
+        )
         >>= expectRight
     fmap renderScheme (analysisRoot vectorAnalysis) `shouldBe` Just "Vec 3 Int"
     fmap renderScheme (analysisRoot matrixAnalysis) `shouldBe` Just "Matrix 2 2 Int"
@@ -364,20 +439,31 @@ spec = describe "analysis" $ do
       `shouldBe` Just
         ( Scheme
             []
-            (TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 2), TLit (LInt 1)])) tInt)
+            ( TApp
+                (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 2), TLit (LInt 1)]))
+                tInt
+            )
         )
 
   it "accepts dependent-ish numeric length constraints for vectors" $ do
     analysis <-
-      analyzeText "main.tynix" (source ["let xs :: Vec (Range 2 4 Nat) Int;", "    xs = [1 2 3];", "in xs"])
+      analyzeText
+        "main.tynix"
+        (source ["let xs :: Vec (Range 2 4 Nat) Int;", "    xs = [1 2 3];", "in xs"])
         >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Vec (Range 2 4 Nat) Int"
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "Vec (Range 2 4 Nat) Int"
 
   it "accepts bounded matrix and tensor annotations across multiple axes" $ do
     matrixAnalysis <-
       analyzeText
         "main.tynix"
-        (source ["let grid :: Matrix (Range 1 2 Nat) 2 Int;", "    grid = [[1 2] [3 4]];", "in grid"])
+        ( source
+            [ "let grid :: Matrix (Range 1 2 Nat) 2 Int;",
+              "    grid = [[1 2] [3 4]];",
+              "in grid"
+            ]
+        )
         >>= expectRight
     tensorAnalysis <-
       analyzeText
@@ -389,42 +475,78 @@ spec = describe "analysis" $ do
             ]
         )
         >>= expectRight
-    fmap renderScheme (analysisRoot matrixAnalysis) `shouldBe` Just "Matrix (Range 1 2 Nat) 2 Int"
-    fmap renderScheme (analysisRoot tensorAnalysis) `shouldBe` Just "Tensor [ 2 (Range 1 2 Nat) 1 ] Int"
+    fmap renderScheme (analysisRoot matrixAnalysis)
+      `shouldBe` Just "Matrix (Range 1 2 Nat) 2 Int"
+    fmap renderScheme (analysisRoot tensorAnalysis)
+      `shouldBe` Just "Tensor [ 2 (Range 1 2 Nat) 1 ] Int"
 
   it "checks numeric validation and units on annotated bindings" $ do
     analysis <-
       analyzeText
         "main.tynix"
-        (source ["let timeout :: Unit \"ms\" (Range 0 5000 Nat);", "    timeout = 2500;", "in timeout"])
+        ( source
+            [ "let timeout :: Unit \"ms\" (Range 0 5000 Nat);",
+              "    timeout = 2500;",
+              "in timeout"
+            ]
+        )
         >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
     analyzeText
       "main.tynix"
-      (source ["let timeout :: Unit \"ms\" (Range 0 5000 Nat);", "    timeout = 9000;", "in timeout"])
+      ( source
+          [ "let timeout :: Unit \"ms\" (Range 0 5000 Nat);",
+            "    timeout = 9000;",
+            "in timeout"
+          ]
+      )
       >>= (`expectLeftContaining` "type mismatch")
 
   it "accepts exact-zero bounded vectors" $ do
     analysis <-
-      analyzeText "main.tynix" (source ["let xs :: Vec (Range 0 0 Nat) Int;", "    xs = [];", "in xs"])
+      analyzeText
+        "main.tynix"
+        (source ["let xs :: Vec (Range 0 0 Nat) Int;", "    xs = [];", "in xs"])
         >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Vec (Range 0 0 Nat) Int"
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "Vec (Range 0 0 Nat) Int"
 
   it "accepts inclusive endpoints for int and float validators" $ do
     timeoutLow <-
-      analyzeText "main.tynix" (source ["let timeout :: Unit \"ms\" (Range 0 5000 Nat);", "    timeout = 0;", "in timeout"])
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let timeout :: Unit \"ms\" (Range 0 5000 Nat);",
+              "    timeout = 0;",
+              "in timeout"
+            ]
+        )
         >>= expectRight
     timeoutHigh <-
-      analyzeText "main.tynix" (source ["let timeout :: Unit \"ms\" (Range 0 5000 Nat);", "    timeout = 5000;", "in timeout"])
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let timeout :: Unit \"ms\" (Range 0 5000 Nat);",
+              "    timeout = 5000;",
+              "in timeout"
+            ]
+        )
         >>= expectRight
     ratioLow <-
-      analyzeText "main.tynix" (source ["let ratio :: Range 0.0 1.0 Float;", "    ratio = 0.0;", "in ratio"])
+      analyzeText
+        "main.tynix"
+        (source ["let ratio :: Range 0.0 1.0 Float;", "    ratio = 0.0;", "in ratio"])
         >>= expectRight
     ratioHigh <-
-      analyzeText "main.tynix" (source ["let ratio :: Range 0.0 1.0 Float;", "    ratio = 1.0;", "in ratio"])
+      analyzeText
+        "main.tynix"
+        (source ["let ratio :: Range 0.0 1.0 Float;", "    ratio = 1.0;", "in ratio"])
         >>= expectRight
-    fmap renderScheme (analysisRoot timeoutLow) `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
-    fmap renderScheme (analysisRoot timeoutHigh) `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
+    fmap renderScheme (analysisRoot timeoutLow)
+      `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
+    fmap renderScheme (analysisRoot timeoutHigh)
+      `shouldBe` Just "Unit \"ms\" (Range 0 5000 Nat)"
     fmap renderScheme (analysisRoot ratioLow) `shouldBe` Just "Range 0.0 1.0 Float"
     fmap renderScheme (analysisRoot ratioHigh) `shouldBe` Just "Range 0.0 1.0 Float"
 
@@ -440,7 +562,8 @@ spec = describe "analysis" $ do
             ]
         )
         >>= expectRight
-    fmap renderScheme (analysisRoot floatAnalysis) `shouldBe` Just "Range 0.0 1.0 Float"
+    fmap renderScheme (analysisRoot floatAnalysis)
+      `shouldBe` Just "Range 0.0 1.0 Float"
     analyzeText
       "main.tynix"
       ( source
@@ -585,14 +708,18 @@ spec = describe "analysis" $ do
             ]
         )
         >>= expectRight
-    dynamicAnalysis <- analyzeText "main.tynix" "import ./opaque.nix as { value :: Int; }" >>= expectRight
+    dynamicAnalysis <-
+      analyzeText "main.tynix" "import ./opaque.nix as { value :: Int; }"
+        >>= expectRight
     fmap renderScheme (analysisRoot widenAnalysis) `shouldBe` Just "Number"
     fmap renderScheme (analysisRoot narrowAnalysis) `shouldBe` Just "Vec 2 Int"
     fmap renderScheme (analysisRoot unknownAnalysis) `shouldBe` Just "Int"
-    fmap renderScheme (analysisRoot dynamicAnalysis) `shouldBe` Just "{\n  value :: Int;\n}"
+    fmap renderScheme (analysisRoot dynamicAnalysis)
+      `shouldBe` Just "{\n  value :: Int;\n}"
 
   it "rejects unrelated concrete as-casts" $ do
-    analyzeText "main.tynix" "1 as String" >>= (`expectLeftContaining` "invalid cast")
+    analyzeText "main.tynix" "1 as String"
+      >>= (`expectLeftContaining` "invalid cast")
     analyzeText
       "main.tynix"
       ( source
@@ -603,73 +730,84 @@ spec = describe "analysis" $ do
       )
       >>= (`expectLeftContaining` "invalid cast")
 
-  it "rejects invalid numeric validator declarations and out-of-range shape unions" $ do
-    analyzeText
-      "main.tynix"
-      ( source
-          [ "let",
-            "  bad :: Range 2 1 Nat;",
-            "  bad = 1;",
-            "in bad"
-          ]
-      )
-      >>= (`expectLeftContaining` "Range bounds are inverted")
-    analyzeText
-      "main.tynix"
-      ( source
-          [ "let",
-            "  xs :: Vec (2 | Range 4 8 Nat) Int;",
-            "  xs = [1 2 3];",
-            "in xs"
-          ]
-      )
-      >>= (`expectLeftContaining` "type mismatch")
-    analyzeText
-      "main.tynix"
-      ( source
-          [ "let",
-            "  grid :: Matrix 2 2 Int;",
-            "  grid = [[1 2] [3]];",
-            "in grid"
-          ]
-      )
-      >>= (`expectLeftContaining` "type mismatch")
-    analyzeText
-      "main.tynix"
-      ( source
-          [ "let",
-            "  grid :: Matrix (Range 1 2 Nat) 2 Int;",
-            "  grid = [[1 2] [3 4] [5 6]];",
-            "in grid"
-          ]
-      )
-      >>= (`expectLeftContaining` "type mismatch")
-    analyzeText
-      "main.tynix"
-      ( source
-          [ "let",
-            "  cube :: Tensor [2 (Range 1 2 Nat) 1] Int;",
-            "  cube = [[[1] [2] [3]] [[4] [5] [6]]];",
-            "in cube"
-          ]
-      )
-      >>= (`expectLeftContaining` "type mismatch")
+  it
+    "rejects invalid numeric validator declarations and out-of-range shape unions"
+    $ do
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let",
+              "  bad :: Range 2 1 Nat;",
+              "  bad = 1;",
+              "in bad"
+            ]
+        )
+        >>= (`expectLeftContaining` "Range bounds are inverted")
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let",
+              "  xs :: Vec (2 | Range 4 8 Nat) Int;",
+              "  xs = [1 2 3];",
+              "in xs"
+            ]
+        )
+        >>= (`expectLeftContaining` "type mismatch")
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let",
+              "  grid :: Matrix 2 2 Int;",
+              "  grid = [[1 2] [3]];",
+              "in grid"
+            ]
+        )
+        >>= (`expectLeftContaining` "type mismatch")
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let",
+              "  grid :: Matrix (Range 1 2 Nat) 2 Int;",
+              "  grid = [[1 2] [3 4] [5 6]];",
+              "in grid"
+            ]
+        )
+        >>= (`expectLeftContaining` "type mismatch")
+      analyzeText
+        "main.tynix"
+        ( source
+            [ "let",
+              "  cube :: Tensor [2 (Range 1 2 Nat) 1] Int;",
+              "  cube = [[[1] [2] [3]] [[4] [5] [6]]];",
+              "in cube"
+            ]
+        )
+        >>= (`expectLeftContaining` "type mismatch")
 
   it "accepts boundary lengths for bounded vectors" $ do
     lowAnalysis <-
-      analyzeText "main.tynix" (source ["let xs :: Vec (Range 0 2 Nat) Int;", "    xs = [];", "in xs"])
+      analyzeText
+        "main.tynix"
+        (source ["let xs :: Vec (Range 0 2 Nat) Int;", "    xs = [];", "in xs"])
         >>= expectRight
     highAnalysis <-
-      analyzeText "main.tynix" (source ["let xs :: Vec (Range 0 2 Nat) Int;", "    xs = [1 2];", "in xs"])
+      analyzeText
+        "main.tynix"
+        (source ["let xs :: Vec (Range 0 2 Nat) Int;", "    xs = [1 2];", "in xs"])
         >>= expectRight
-    fmap renderScheme (analysisRoot lowAnalysis) `shouldBe` Just "Vec (Range 0 2 Nat) Int"
-    fmap renderScheme (analysisRoot highAnalysis) `shouldBe` Just "Vec (Range 0 2 Nat) Int"
+    fmap renderScheme (analysisRoot lowAnalysis)
+      `shouldBe` Just "Vec (Range 0 2 Nat) Int"
+    fmap renderScheme (analysisRoot highAnalysis)
+      `shouldBe` Just "Vec (Range 0 2 Nat) Int"
 
   it "checks tuple annotations against heterogeneous list literals" $ do
     tupleAnalysis <-
-      analyzeText "main.tynix" (source ["let pair :: Tuple [Int String];", "    pair = [1 \"x\"];", "in pair"])
+      analyzeText
+        "main.tynix"
+        (source ["let pair :: Tuple [Int String];", "    pair = [1 \"x\"];", "in pair"])
         >>= expectRight
-    fmap renderScheme (analysisRoot tupleAnalysis) `shouldBe` Just "Tuple [ Int String ]"
+    fmap renderScheme (analysisRoot tupleAnalysis)
+      `shouldBe` Just "Tuple [ Int String ]"
 
   it "accepts explicitly linear functions whose binders are consumed once" $ do
     analysis <-
@@ -692,7 +830,9 @@ spec = describe "analysis" $ do
       >>= (`expectLeftContaining` "[TC0026] linear binder `x` is never used")
     analyzeText
       "main.tynix"
-      (source ["let", "  dup :: Int %1 -> Tuple [Int Int];", "  dup = x: [x x];", "in dup"])
+      ( source
+          ["let", "  dup :: Int %1 -> Tuple [Int Int];", "  dup = x: [x x];", "in dup"]
+      )
       >>= (`expectLeftContaining` "[TC0026] linear binder `x` is used more than once")
 
   it "treats imports without declarations as dynamic for incremental adoption" $ do
@@ -703,7 +843,9 @@ spec = describe "analysis" $ do
     withTempTree
       [ ("app/main.tynix", "import ./lib.nix"),
         ("app/flake.nix", "{}"),
-        ("app/types.d.tynix", "declare \"./lib.nix\" { default :: { value :: Int; label :: String; }; };")
+        ( "app/types.d.tynix",
+          "declare \"./lib.nix\" { default :: { value :: Int; label :: String; }; };"
+        )
       ]
       ( \root -> do
           analysis <- analyzeFile (root <> "/app/main.tynix") >>= expectRight
@@ -731,10 +873,14 @@ spec = describe "analysis" $ do
   it "keeps declaration support separate per workspace root when sharing a cache" $
     withTempTree
       [ ("one/flake.nix", "{}"),
-        ("one/types.d.tynix", "declare \"./lib.nix\" { default :: { value :: Int; }; };"),
+        ( "one/types.d.tynix",
+          "declare \"./lib.nix\" { default :: { value :: Int; }; };"
+        ),
         ("one/main.tynix", "import ./lib.nix"),
         ("two/flake.nix", "{}"),
-        ("two/types.d.tynix", "declare \"./lib.nix\" { default :: { value :: String; }; };"),
+        ( "two/types.d.tynix",
+          "declare \"./lib.nix\" { default :: { value :: String; }; };"
+        ),
         ("two/main.tynix", "import ./lib.nix")
       ]
       ( \root -> do
@@ -810,8 +956,9 @@ spec = describe "analysis" $ do
             `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("value", tInt)])))
       )
 
-  it "does not load ambient declarations from nested workspaces into the parent workspace" $
-    withTempTree
+  it
+    "does not load ambient declarations from nested workspaces into the parent workspace"
+    $ withTempTree
       [ ("flake.nix", "{}"),
         ( "builtins.d.tynix",
           source
@@ -919,9 +1066,15 @@ spec = describe "analysis" $ do
     fmap renderScheme (analysisRoot analysis) `shouldBe` Just "1 | \"x\""
 
   it "rejects duplicate let bindings and signatures" $ do
-    analyzeText "main.tynix" (source ["let", "  value = 1;", "  value = 2;", "in value"])
+    analyzeText
+      "main.tynix"
+      (source ["let", "  value = 1;", "  value = 2;", "in value"])
       >>= (`expectLeftContaining` "duplicate bindings")
-    analyzeText "main.tynix" (source ["let", "  value :: Int;", "  value :: String;", "  value = 1;", "in value"])
+    analyzeText
+      "main.tynix"
+      ( source
+          ["let", "  value :: Int;", "  value :: String;", "  value = 1;", "in value"]
+      )
       >>= (`expectLeftContaining` "duplicate signatures")
 
   it "rejects passing concrete types to higher-kinded parameters" $
@@ -942,7 +1095,9 @@ spec = describe "analysis" $ do
       >>= (`expectLeftContaining` "nat-like")
     analyzeText "main.tynix" "let xs :: Vec (Unit \"ms\" Nat) Int; xs = [1]; in xs"
       >>= (`expectLeftContaining` "nat-like")
-    analyzeText "main.tynix" "let xs :: Vec (Range 0.0 2.0 Nat) Int; xs = [1]; in xs"
+    analyzeText
+      "main.tynix"
+      "let xs :: Vec (Range 0.0 2.0 Nat) Int; xs = [1]; in xs"
       >>= (`expectLeftContaining` "nat-like")
     analyzeText "main.tynix" "let xs :: Vec 2 Int; xs = [1 2 3]; in xs"
       >>= (`expectLeftContaining` "type mismatch")
@@ -950,29 +1105,40 @@ spec = describe "analysis" $ do
   it "rejects missing bindings and explicit signature mismatches" $ do
     analyzeText "main.tynix" (source ["let", "  value :: Int;", "in 1"])
       >>= (`expectLeftContaining` "missing bindings for signatures")
-    analyzeText "main.tynix" (source ["let", "  value :: String;", "  value = 1;", "in value"])
+    analyzeText
+      "main.tynix"
+      (source ["let", "  value :: String;", "  value = 1;", "in value"])
       >>= (`expectLeftContaining` "type mismatch")
 
   it "rejects duplicate attribute names from fields and inherit clauses" $ do
-    analyzeText "main.tynix" (source ["let", "  value = 1;", "in { value = 2; inherit value; }"])
+    analyzeText
+      "main.tynix"
+      (source ["let", "  value = 1;", "in { value = 2; inherit value; }"])
       >>= (`expectLeftContaining` "duplicate attribute")
 
   it "reports occurs checks for self-application" $
-    analyzeText "main.tynix" "let omega = x: x x; in omega" >>= (`expectLeftContaining` "occurs check failed")
+    analyzeText "main.tynix" "let omega = x: x x; in omega"
+      >>= (`expectLeftContaining` "occurs check failed")
 
   it "reports parse failures from sibling declaration files" $
     withTempTree
       [ ("app/main.tynix", "import ./lib.nix"),
         ("app/types.d.tynix", "declare \"./lib.nix\" { default :: ; };")
       ]
-      (\root -> analyzeFile (root <> "/app/main.tynix") >>= (`expectLeftContaining` "failed to load declaration file"))
+      ( \root ->
+          analyzeFile (root <> "/app/main.tynix")
+            >>= (`expectLeftContaining` "failed to load declaration file")
+      )
 
   it "rejects executable declaration files while loading ambient support" $
     withTempTree
       [ ("app/main.tynix", "import ./lib.nix"),
         ("app/types.d.tynix", "declare \"./lib.nix\" { default :: Int; }; 1")
       ]
-      (\root -> analyzeFile (root <> "/app/main.tynix") >>= (`expectLeftContaining` "must not contain executable expressions"))
+      ( \root ->
+          analyzeFile (root <> "/app/main.tynix")
+            >>= (`expectLeftContaining` "must not contain executable expressions")
+      )
 
   it "rejects duplicate ambient targets across declaration files" $
     withTempTree
@@ -981,7 +1147,10 @@ spec = describe "analysis" $ do
         ("app/a.d.tynix", "declare \"./lib.nix\" { default :: Int; };"),
         ("app/b.d.tynix", "declare \"./lib.nix\" { default :: String; };")
       ]
-      (\root -> analyzeFile (root <> "/app/main.tynix") >>= (`expectLeftContaining` "duplicate ambient declarations"))
+      ( \root ->
+          analyzeFile (root <> "/app/main.tynix")
+            >>= (`expectLeftContaining` "duplicate ambient declarations")
+      )
 
   it "rejects duplicate entries inside one ambient declaration" $
     analyzeText
@@ -1018,23 +1187,27 @@ spec = describe "analysis" $ do
         )
         >>= expectRight
     fmap renderScheme (analysisRoot analysis) `shouldBe` Just "dynamic"
-    fmap renderScheme (Map.lookup "value" (analysisBindings analysis)) `shouldBe` Just "dynamic"
+    fmap renderScheme (Map.lookup "value" (analysisBindings analysis))
+      `shouldBe` Just "dynamic"
 
-  it "lets a signature-line @tynix-expected suppress the matching binding mismatch" $ do
-    analysis <-
-      analyzeText
-        "main.tynix"
-        ( source
-            [ "let",
-              "  # @tynix-expected",
-              "  value :: Int;",
-              "  value = \"oops\";",
-              "in value"
-            ]
-        )
-        >>= expectRight
-    fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Int"
-    fmap renderScheme (Map.lookup "value" (analysisBindings analysis)) `shouldBe` Just "Int"
+  it
+    "lets a signature-line @tynix-expected suppress the matching binding mismatch"
+    $ do
+      analysis <-
+        analyzeText
+          "main.tynix"
+          ( source
+              [ "let",
+                "  # @tynix-expected",
+                "  value :: Int;",
+                "  value = \"oops\";",
+                "in value"
+              ]
+          )
+          >>= expectRight
+      fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Int"
+      fmap renderScheme (Map.lookup "value" (analysisBindings analysis))
+        `shouldBe` Just "Int"
 
   it "suppresses root-expression failures with @tynix-ignore" $ do
     analysis <-

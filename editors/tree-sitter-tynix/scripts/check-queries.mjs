@@ -33,11 +33,20 @@ for (const dir of queryDirs) {
   }
   for (const name of entries) {
     const file = join(dir, name);
-    const result = spawnSync(cli, ["query", file, sample], { cwd: grammarDir, encoding: "utf8" });
+    const result = spawnSync(cli, ["query", file, sample], {
+      cwd: grammarDir,
+      encoding: "utf8",
+    });
     checked += 1;
     const stderr = (result.stderr ?? "")
       .split("\n")
-      .filter((line) => line.trim() && !/parser directories|init-config|configuration file|language grammars/.test(line))
+      .filter(
+        (line) =>
+          line.trim() &&
+          !/parser directories|init-config|configuration file|language grammars/.test(
+            line,
+          ),
+      )
       .join("\n");
     if (result.status !== 0 || /error/i.test(stderr)) {
       failures += 1;

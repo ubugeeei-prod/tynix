@@ -55,7 +55,8 @@ localSymbolAt scan off = do
       | otherwise -> Just (LocalType b)
     Nothing
       | isTypeToken scan i -> LocalType <$> typeBinderFor (tokText t) (tokStart t)
-      | isReferenceToken scan i -> LocalValue <$> resolveNameAt scan (tokText t) (tokStart t)
+      | isReferenceToken scan i ->
+          LocalValue <$> resolveNameAt scan (tokText t) (tokStart t)
       | otherwise -> Nothing
   where
     typeBinderFor name at' =
@@ -106,7 +107,8 @@ renameableAt :: Scan -> Int -> Maybe ((Int, Int), Text)
 renameableAt scan off = do
   i <- codeTokenIndexAt scan off
   t <- codeToken scan i
-  if tokKind t == KIdent && tokText t `notElem` ["true", "false", "null", "builtins", "import"]
+  if tokKind t == KIdent
+    && tokText t `notElem` ["true", "false", "null", "builtins", "import"]
     then Just ((tokStart t, tokEnd t), tokText t)
     else Nothing
 
@@ -148,7 +150,10 @@ selectionRangesAt scan off = chain (sortOn size (nub candidates))
              binderScopeStart b <= off,
              off <= binderScopeEnd b
            ]
-    candidates = filter (\(s, e) -> s <= off && off <= e) (tokenRange <> groups <> declarations <> [whole])
+    candidates =
+      filter
+        (\(s, e) -> s <= off && off <= e)
+        (tokenRange <> groups <> declarations <> [whole])
     chain [] = []
     chain (r : rs) = r : chain (filter (\x -> contains x r && x /= r) rs)
     contains (s1, e1) (s2, e2) = s1 <= s2 && e2 <= e1
@@ -189,7 +194,9 @@ documentSymbolTree ctx = nest (sortOn (second negate . symbolRange) flat)
       kw <- codeToken scan i
       target <- codeToken scan (i + 1)
       brace <- codeToken scan (i + 2)
-      if tokText kw == "declare" && tokKind target `elem` [KString, KPath] && tokText brace == "{"
+      if tokText kw == "declare"
+        && tokKind target `elem` [KString, KPath]
+        && tokText brace == "{"
         then Just ()
         else Nothing
       c <- matchingCloser scan (i + 2)
@@ -199,8 +206,15 @@ documentSymbolTree ctx = nest (sortOn (second negate . symbolRange) flat)
                 { symbolName = ambientDocName d,
                   symbolDetail = Just (ambientDocType d),
                   symbolKind = if "->" `Text.isInfixOf` ambientDocType d then 12 else 13,
-                  symbolRange = (ambientDocOffset d, ambientDocOffset d + Text.length (ambientDocName d) + 4 + Text.length (ambientDocType d)),
-                  symbolSelection = (ambientDocOffset d, ambientDocOffset d + Text.length (ambientDocName d)),
+                  symbolRange =
+                    ( ambientDocOffset d,
+                      ambientDocOffset d
+                        + Text.length (ambientDocName d)
+                        + 4
+                        + Text.length (ambientDocType d)
+                    ),
+                  symbolSelection =
+                    (ambientDocOffset d, ambientDocOffset d + Text.length (ambientDocName d)),
                   symbolChildren = []
                 }
             | d <- ambientDocs scan,
@@ -232,7 +246,11 @@ documentSymbolTree ctx = nest (sortOn (second negate . symbolRange) flat)
     startsLambda b = case binderValue b of
       Just (from, _) -> maybe False ((== ":") . tokText) (codeToken scan (from + 1))
       Nothing -> False
-    letNames = [binderNameStart b | b <- scanBinders scan, binderKind b `elem` [BindLet, BindRecField]]
+    letNames =
+      [ binderNameStart b
+      | b <- scanBinders scan,
+        binderKind b `elem` [BindLet, BindRecField]
+      ]
     fields =
       [ SymbolNode
           { symbolName = tokText t,
@@ -280,7 +298,8 @@ attrFieldStatements scan =
           | otherwise = go (stmtStop k (0 :: Int) + 1)
         stmtStop k lets
           | k >= c = c
-          | textAt k `elem` ["{", "(", "[", "${"] = maybe c (\cl -> stmtStop (cl + 1) lets) (matchingCloser scan k)
+          | textAt k `elem` ["{", "(", "[", "${"] =
+              maybe c (\cl -> stmtStop (cl + 1) lets) (matchingCloser scan k)
           | textAt k == "let" = stmtStop (k + 1) (lets + 1)
           | textAt k == "in" = stmtStop (k + 1) (max 0 (lets - 1))
           | textAt k == ";" && lets == 0 = k
@@ -291,7 +310,8 @@ encodeSymbolTree :: Scan -> [SymbolNode] -> [Value]
 encodeSymbolTree scan = map encode
   where
     idx = scanLineIndex scan
-    pos off = let (l, c) = offsetToPosition idx off in object ["line" .= l, "character" .= c]
+    pos off =
+      let (l, c) = offsetToPosition idx off in object ["line" .= l, "character" .= c]
     rangeV (s, e) = object ["start" .= pos s, "end" .= pos e]
     encode node =
       object $

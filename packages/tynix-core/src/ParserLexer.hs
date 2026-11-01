@@ -142,7 +142,13 @@ asVariable = lexeme . try $ do
           void (string "++"),
           void (string "-"),
           eof,
-          void (choice (map (\w -> string w <* notFollowedBy (satisfy identCont)) ["in", "then", "else", "or"]))
+          void
+            ( choice
+                ( map
+                    (\w -> string w <* notFollowedBy (satisfy identCont))
+                    ["in", "then", "else", "or"]
+                )
+            )
         ]
 
 -- | Parse a type-level identifier, where tynix's type keywords are reserved.
@@ -189,7 +195,9 @@ stringLiteral = lexeme $ Text.pack <$> (char '"' *> manyTill L.charLiteral (char
 -- round-trip shell hooks and install phases without first understanding every
 -- string escape.
 indentedStringLiteral :: Parser Text
-indentedStringLiteral = lexeme $ Text.pack <$> (try (string "''") *> manyTill anySingle (try (string "''")))
+indentedStringLiteral =
+  lexeme $
+    Text.pack <$> (try (string "''") *> manyTill anySingle (try (string "''")))
 
 -- | Parse any executable string literal form supported by tynix.
 termStringLiteral :: Parser Syntax.StringLiteral
@@ -289,11 +297,48 @@ brackets = between (symbol "[") (symbol "]")
 
 termReservedWords :: [Text]
 termReservedWords =
-  ["as", "assert", "else", "false", "if", "in", "inherit", "let", "null", "or", "rec", "then", "true", "with"]
+  [ "as",
+    "assert",
+    "else",
+    "false",
+    "if",
+    "in",
+    "inherit",
+    "let",
+    "null",
+    "or",
+    "rec",
+    "then",
+    "true",
+    "with"
+  ]
 
 reservedWords :: [Text]
 reservedWords =
-  ["Tuple", "any", "as", "assert", "declare", "dynamic", "else", "extends", "false", "forall", "if", "import", "in", "infer", "inherit", "let", "null", "rec", "then", "true", "type", "unknown", "with"]
+  [ "Tuple",
+    "any",
+    "as",
+    "assert",
+    "declare",
+    "dynamic",
+    "else",
+    "extends",
+    "false",
+    "forall",
+    "if",
+    "import",
+    "in",
+    "infer",
+    "inherit",
+    "let",
+    "null",
+    "rec",
+    "then",
+    "true",
+    "type",
+    "unknown",
+    "with"
+  ]
 
 identStart, identCont, pathChar, pathSegmentStart :: Char -> Bool
 identStart c = isLetter c || c == '_'

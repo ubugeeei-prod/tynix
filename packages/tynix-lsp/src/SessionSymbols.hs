@@ -32,7 +32,12 @@ import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Driver (Analysis (..))
-import Server (findDefinitionRange, findFieldRange, location, textRangeToUtf16Columns)
+import Server
+  ( findDefinitionRange,
+    findFieldRange,
+    location,
+    textRangeToUtf16Columns,
+  )
 import SessionTypes (IndexedSymbol (..), WorkspaceDocument (..))
 import Subtyping (resolveType)
 import Syntax
@@ -52,7 +57,8 @@ import Type
 -- Bindings, top-level aliases, ambient declarations / entries, and the
 -- fields of a record root each contribute. The result is sorted by source
 -- position so 'workspace/symbol' picks a stable order.
-documentIndexedSymbols :: FilePath -> Text -> Either String Analysis -> [IndexedSymbol]
+documentIndexedSymbols ::
+  FilePath -> Text -> Either String Analysis -> [IndexedSymbol]
 documentIndexedSymbols file content result =
   case result of
     Left _ -> []
@@ -153,9 +159,17 @@ documentIndexedSymbols file content result =
 -- so 'workspace/symbol' picks a deterministic order.
 workspaceIndexedSymbols :: [WorkspaceDocument] -> [IndexedSymbol]
 workspaceIndexedSymbols workspace =
-  sortOn (\symbol -> (indexedSymbolName symbol, indexedSymbolFile symbol, indexedSymbolRange symbol)) $
-    concatMap
-      (\doc -> documentIndexedSymbols (workspaceDocumentFile doc) (workspaceDocumentContent doc) (workspaceDocumentAnalysis doc))
+  sortOn
+    ( \symbol ->
+        (indexedSymbolName symbol, indexedSymbolFile symbol, indexedSymbolRange symbol)
+    )
+    $ concatMap
+      ( \doc ->
+          documentIndexedSymbols
+            (workspaceDocumentFile doc)
+            (workspaceDocumentContent doc)
+            (workspaceDocumentAnalysis doc)
+      )
       workspace
 
 -- | Convert a single 'IndexedSymbol' into the JSON shape LSP expects from
@@ -165,9 +179,13 @@ indexedSymbolInformation symbol =
   object $
     [ "name" .= indexedSymbolName symbol,
       "kind" .= indexedSymbolKind symbol,
-      "location" .= locationFromRange (indexedSymbolFile symbol) (indexedSymbolRange symbol)
+      "location"
+        .= locationFromRange (indexedSymbolFile symbol) (indexedSymbolRange symbol)
     ]
-      <> maybe [] (\container -> ["containerName" .= container]) (indexedSymbolContainer symbol)
+      <> maybe
+        []
+        (\container -> ["containerName" .= container])
+        (indexedSymbolContainer symbol)
 
 -- | Candidate name list used by completion / rename to score against the
 -- current buffer.
@@ -179,7 +197,9 @@ documentCandidateNames result =
       nub $
         Map.keys (analysisBindings analysis)
           <> map typeAliasName (programAliases (analysisProgram analysis))
-          <> concatMap (map ambientEntryName . ambientEntries) (programAmbient (analysisProgram analysis))
+          <> concatMap
+            (map ambientEntryName . ambientEntries)
+            (programAmbient (analysisProgram analysis))
 
 -- | Locate the @declare "..."@ header for a given ambient path.
 --
@@ -195,7 +215,11 @@ findDeclareRange content path =
                   "declare " <> Text.pack path
                 ]
            in listToMaybe
-                [ let (startColumn, endColumn) = textRangeToUtf16Columns line (startOffset + 8) (startOffset + 8 + Text.length (Text.pack path))
+                [ let (startColumn, endColumn) =
+                        textRangeToUtf16Columns
+                          line
+                          (startOffset + 8)
+                          (startOffset + 8 + Text.length (Text.pack path))
                    in (lineNo, startColumn, endColumn)
                 | needle <- needles,
                   (prefix, suffix) <- Text.breakOnAll needle line,

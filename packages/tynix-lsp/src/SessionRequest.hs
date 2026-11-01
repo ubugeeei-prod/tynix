@@ -31,7 +31,10 @@ import System.FilePath (normalise)
 -- | Decode the document URI, preserving the empty-path fallback for malformed requests.
 documentFile :: Value -> FilePath
 documentFile message =
-  maybe "" (normalise . uriPath) (field "params" message >>= field "textDocument" >>= field "uri" >>= asText)
+  maybe
+    ""
+    (normalise . uriPath)
+    (field "params" message >>= field "textDocument" >>= field "uri" >>= asText)
 
 -- | Decode a UTF-16 position, defaulting missing coordinates to zero.
 positionOf :: Maybe Value -> (Int, Int)
@@ -65,7 +68,14 @@ data Request = Request
     requestOffset :: Int
   }
 
-loadRequestAt :: DocumentReader -> DocumentAnalyzer -> Documents -> FilePath -> Int -> Int -> IO (Either String Request)
+loadRequestAt ::
+  DocumentReader ->
+  DocumentAnalyzer ->
+  Documents ->
+  FilePath ->
+  Int ->
+  Int ->
+  IO (Either String Request)
 loadRequestAt readDocument analyze docs file lineNo charNo = do
   contentResult <- loadDocumentContent readDocument docs file
   case contentResult of
@@ -74,9 +84,22 @@ loadRequestAt readDocument analyze docs file lineNo charNo = do
       result <- loadDocumentAnalysis readDocument analyze docs file
       let ctx = mkCtx file content result
           off = positionToOffset (scanLineIndex (ctxScan ctx)) (lineNo, charNo)
-      pure (Right Request{requestFile = file, requestContent = content, requestContext = ctx, requestOffset = off})
+      pure
+        ( Right
+            Request
+              { requestFile = file,
+                requestContent = content,
+                requestContext = ctx,
+                requestOffset = off
+              }
+        )
 
-loadRequest :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO (Either String Request)
+loadRequest ::
+  DocumentReader ->
+  DocumentAnalyzer ->
+  Documents ->
+  Value ->
+  IO (Either String Request)
 loadRequest readDocument analyze docs msg = do
   let params = field "params" msg
       position = params >>= field "position"
@@ -96,7 +119,10 @@ rangeValueOf :: Scan -> (Int, Int) -> Value
 rangeValueOf scan (s, e) = object ["start" .= posValue scan s, "end" .= posValue scan e]
 
 lineRangeOf :: Scan -> (Int, Int) -> ((Int, Int), (Int, Int))
-lineRangeOf scan (s, e) = (offsetToPosition (scanLineIndex scan) s, offsetToPosition (scanLineIndex scan) e)
+lineRangeOf scan (s, e) =
+  ( offsetToPosition (scanLineIndex scan) s,
+    offsetToPosition (scanLineIndex scan) e
+  )
 
 locationOf :: FilePath -> Scan -> (Int, Int) -> Value
 locationOf file scan range = object ["uri" .= pathUri file, "range" .= rangeValueOf scan range]

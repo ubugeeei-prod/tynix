@@ -63,7 +63,11 @@ spec = do
       let program =
             Program
               { programAliases =
-                  [plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))],
+                  [ plainAlias
+                      "Pair"
+                      ["a", "b"]
+                      (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))
+                  ],
                 programAmbient = [],
                 programMacros = [],
                 programExpr = Just (markedExpr (EInt 1))
@@ -95,7 +99,11 @@ spec = do
                 programExpr = Just (markedExpr (EInt 1))
               }
           scheme = Scheme [] tInt
-      emitDeclarationFileFor "/abs/runtime.nix" "/abs/types/runtime.d.tynix" program scheme
+      emitDeclarationFileFor
+        "/abs/runtime.nix"
+        "/abs/types/runtime.d.tynix"
+        program
+        scheme
         `shouldContain'` "declare \"../runtime.nix\""
 
     it "strips redundant casts before deciding the emission shape" $ do

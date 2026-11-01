@@ -93,7 +93,10 @@ parseTypeText source
 
 -- | Registry alias conventionally used for a well-known argument name.
 conventionalAlias :: Text -> Maybe Text
-conventionalAlias name = lookup name [("lib", "NixpkgsLib"), ("pkgs", "NixpkgsPkgs"), ("stdenv", "NixpkgsStdenv")]
+conventionalAlias name =
+  lookup
+    name
+    [("lib", "NixpkgsLib"), ("pkgs", "NixpkgsPkgs"), ("stdenv", "NixpkgsStdenv")]
 
 -- | Best-effort type of a binder.
 binderType :: Ctx -> Binder -> Maybe Type
@@ -131,7 +134,9 @@ binderTypeAt fuel ctx b
       | binderKind b == BindRecField,
         Just root <- rootAttrsetOpener scan,
         binderScopeStart b == maybe (-1) tokStart (codeToken scan root) =
-          analysis >>= analysisRoot >>= \scheme -> lookupRecordField (ctxAliases ctx) (schemeType scheme) (binderName b)
+          do
+            scheme <- analysis >>= analysisRoot
+            lookupRecordField (ctxAliases ctx) (schemeType scheme) (binderName b)
       | otherwise = Nothing
     conventional
       | binderKind b `elem` [BindParam, BindPatternField] = do
@@ -170,7 +175,8 @@ valueType fuel ctx from to
     toks = mapMaybe (codeToken scan) [from .. to - 1]
     selection [] = Just []
     selection (dot : name : more)
-      | tokText dot == "." && tokKind name == KIdent = (tokText name :) <$> selection more
+      | tokText dot == "." && tokKind name == KIdent =
+          (tokText name :) <$> selection more
     selection _ = Nothing
 
 importType :: Ctx -> Text -> Maybe Type
@@ -249,7 +255,8 @@ binderDoc ctx b =
       anchor = case binderKind b of
         BindPatternField -> binderNameStart b
         BindParam -> binderNameStart b
-        _ -> maybe (binderDeclStart b) (min (binderDeclStart b) . fst) (binderSignature b)
+        _ ->
+          maybe (binderDeclStart b) (min (binderDeclStart b) . fst) (binderSignature b)
    in docCommentForOffset scan anchor
 
 -- | One documented entry of a @declare@ block or a type alias.
@@ -296,11 +303,14 @@ ambientDocs scan = concatMap declareAt [0 .. codeTokenCount scan - 1]
           | otherwise = go (k + 1)
         stmtStop k
           | k >= to = to
-          | textAt k `elem` ["{", "(", "["] = maybe to (stmtStop . (+ 1)) (matchingCloser scan k)
+          | textAt k `elem` ["{", "(", "["] =
+              maybe to (stmtStop . (+ 1)) (matchingCloser scan k)
           | textAt k == ";" = k
           | otherwise = stmtStop (k + 1)
     sliceTokens a b = case (tok a, tok (b - 1)) of
-      (Just s, Just e) -> Text.strip (Text.take (tokEnd e - tokStart s) (Text.drop (tokStart s) (scanContent scan)))
+      (Just s, Just e) ->
+        Text.strip
+          (Text.take (tokEnd e - tokStart s) (Text.drop (tokStart s) (scanContent scan)))
       _ -> ""
     unquote t = fromMaybe t (Text.stripPrefix "\"" t >>= Text.stripSuffix "\"")
 

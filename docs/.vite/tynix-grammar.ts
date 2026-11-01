@@ -17,15 +17,27 @@ const typeExpression = {
     { begin: "\\(", end: "\\)", patterns: [{ include: "#typeExpr" }] },
     { include: "#string" },
     { match: "\\b(forall|extends|infer)\\b", name: "keyword.other.type.tynix" },
-    { match: "\\b(Type)\\b(?=\\s*(?:->|\\)|$))", name: "keyword.other.type.tynix" },
+    {
+      match: "\\b(Type)\\b(?=\\s*(?:->|\\)|$))",
+      name: "keyword.other.type.tynix",
+    },
     { match: "::", name: "keyword.operator.annotation.tynix" },
     { match: "!(?!=)", name: "keyword.operator.type.tynix" },
-    { match: "\\b(dynamic|unknown|any)\\b", name: "support.type.gradual.tynix" },
+    {
+      match: "\\b(dynamic|unknown|any)\\b",
+      name: "support.type.gradual.tynix",
+    },
     { match: "\\b(true|false)\\b", name: "constant.language.boolean.tynix" },
     { match: "-?\\b\\d+(\\.\\d+)?\\b", name: "constant.numeric.tynix" },
     { match: "\\b[A-Z][A-Za-z0-9_'-]*", name: "entity.name.type.tynix" },
-    { match: "%1\\s*->|->|\\||\\?|:(?!:)", name: "keyword.operator.type.tynix" },
-    { match: "\\b[a-z_][A-Za-z0-9_'-]*", name: "variable.parameter.type.tynix" },
+    {
+      match: "%1\\s*->|->|\\||\\?|:(?!:)",
+      name: "keyword.operator.type.tynix",
+    },
+    {
+      match: "\\b[a-z_][A-Za-z0-9_'-]*",
+      name: "variable.parameter.type.tynix",
+    },
   ],
 };
 
@@ -69,7 +81,8 @@ export const tynixGrammar = {
       ],
     },
     typeAlias: {
-      begin: "\\b(?:(opaque)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_'-]*)((?:\\s+(?:[a-z_][A-Za-z0-9_'-]*|\\([^)]*\\)))*)\\s*(=)",
+      begin:
+        "\\b(?:(opaque)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_'-]*)((?:\\s+(?:[a-z_][A-Za-z0-9_'-]*|\\([^)]*\\)))*)\\s*(=)",
       beginCaptures: {
         1: { name: "keyword.other.type.tynix" },
         2: { name: "keyword.other.type.tynix" },
@@ -103,9 +116,13 @@ export const tynixGrammar = {
     },
     metavariable: {
       patterns: [
-        { match: "\\$\\(|\\)[,;]?[*+?](?=\\s)|=>", name: "keyword.other.type.tynix" },
         {
-          match: "(\\$[A-Za-z_][A-Za-z0-9_'-]*)(?:(:)(expr|ident|type|string)\\b)?",
+          match: "\\$\\(|\\)[,;]?[*+?](?=\\s)|=>",
+          name: "keyword.other.type.tynix",
+        },
+        {
+          match:
+            "(\\$[A-Za-z_][A-Za-z0-9_'-]*)(?:(:)(expr|ident|type|string)\\b)?",
           captures: {
             1: { name: "variable.parameter.type.tynix" },
             2: { name: "keyword.operator.annotation.tynix" },
@@ -123,16 +140,24 @@ export const tynixGrammar = {
     typeRecord: {
       begin: "\\{",
       end: "\\}",
-      beginCaptures: { 0: { name: "punctuation.definition.type.record.tynix" } },
+      beginCaptures: {
+        0: { name: "punctuation.definition.type.record.tynix" },
+      },
       endCaptures: { 0: { name: "punctuation.definition.type.record.tynix" } },
       patterns: [
         { include: "#comment" },
         // Effect rows (`! { Trace | e }`) and capture sets (`->{fetch}`).
-        { match: "\\b[A-Z][A-Za-z0-9_'-]*\\b(?=\\s*[,|}])", name: "entity.name.type.tynix" },
-        { match: "\\b[a-z_][A-Za-z0-9_'-]*\\b(?=\\s*[,}])", name: "variable.parameter.type.tynix" },
+        {
+          match: "\\b[A-Z][A-Za-z0-9_'-]*\\b(?=\\s*[,|}])",
+          name: "entity.name.type.tynix",
+        },
+        {
+          match: "\\b[a-z_][A-Za-z0-9_'-]*\\b(?=\\s*[,}])",
+          name: "variable.parameter.type.tynix",
+        },
         { match: "[,|]", name: "keyword.operator.type.tynix" },
         {
-          begin: "(\"[^\"]*\"|[A-Za-z_][A-Za-z0-9_'-]*)\\s*(\\?)?\\s*(::)",
+          begin: '("[^"]*"|[A-Za-z_][A-Za-z0-9_\'-]*)\\s*(\\?)?\\s*(::)',
           beginCaptures: {
             1: { name: "variable.other.property.tynix" },
             2: { name: "keyword.operator.type.tynix" },
@@ -160,8 +185,8 @@ export const tynixGrammar = {
       patterns: [{ include: "#typeExpr" }],
     },
     string: {
-      begin: "\"",
-      end: "\"",
+      begin: '"',
+      end: '"',
       name: "string.quoted.double.tynix",
       patterns: [
         { match: "\\\\.", name: "constant.character.escape.tynix" },
@@ -180,14 +205,19 @@ export const tynixGrammar = {
     interpolation: {
       begin: "\\$\\{",
       end: "\\}",
-      beginCaptures: { 0: { name: "punctuation.section.embedded.begin.tynix" } },
+      beginCaptures: {
+        0: { name: "punctuation.section.embedded.begin.tynix" },
+      },
       endCaptures: { 0: { name: "punctuation.section.embedded.end.tynix" } },
       name: "meta.embedded.tynix",
       patterns: [{ include: "$self" }],
     },
     keyword: {
       patterns: [
-        { match: "\\b(let|in|if|then|else|assert|with|rec|inherit|or)\\b", name: "keyword.control.tynix" },
+        {
+          match: "\\b(let|in|if|then|else|assert|with|rec|inherit|or)\\b",
+          name: "keyword.control.tynix",
+        },
         { match: "\\b(import)\\b", name: "support.function.import.tynix" },
         { match: "\\b(builtins)\\b", name: "support.variable.builtins.tynix" },
       ],
@@ -195,15 +225,19 @@ export const tynixGrammar = {
     constant: {
       patterns: [
         { match: "\\b(true|false|null)\\b", name: "constant.language.tynix" },
-        { match: "-?\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b", name: "constant.numeric.tynix" },
+        {
+          match: "-?\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b",
+          name: "constant.numeric.tynix",
+        },
       ],
     },
     path: {
-      match: "(?:\\.{1,2}|~)?/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*|<[A-Za-z0-9._+/-]+>",
+      match:
+        "(?:\\.{1,2}|~)?/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*|<[A-Za-z0-9._+/-]+>",
       name: "string.unquoted.path.tynix",
     },
     attribute: {
-      match: "([A-Za-z_][A-Za-z0-9_'-]*|\"[^\"]*\")(?=\\s*=(?!=))",
+      match: '([A-Za-z_][A-Za-z0-9_\'-]*|"[^"]*")(?=\\s*=(?!=))',
       name: "variable.other.property.tynix",
     },
     operator: {

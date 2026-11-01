@@ -14,8 +14,20 @@ const grammarDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(grammarDir, "..", "..");
 const cli = process.env.TREE_SITTER ?? "tree-sitter";
 
-const roots = ["examples", "dogfood", "registry", "packages/tynix-core/fixtures", "editors/tree-sitter-tynix/examples"];
-const skipDirs = new Set(["node_modules", ".git", "dist", "dist-newstyle", "target"]);
+const roots = [
+  "examples",
+  "dogfood",
+  "registry",
+  "packages/tynix-core/fixtures",
+  "editors/tree-sitter-tynix/examples",
+];
+const skipDirs = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "dist-newstyle",
+  "target",
+]);
 
 function collect(dir, out) {
   let entries;
@@ -40,7 +52,10 @@ files.push(...process.argv.slice(2).map((file) => resolve(file)));
 
 let failures = 0;
 for (const file of files) {
-  const result = spawnSync(cli, ["parse", file], { cwd: grammarDir, encoding: "utf8" });
+  const result = spawnSync(cli, ["parse", file], {
+    cwd: grammarDir,
+    encoding: "utf8",
+  });
   const tree = result.stdout ?? "";
   const bad = /\((ERROR|MISSING)/.test(tree) || result.status !== 0;
   if (bad) {
@@ -48,9 +63,12 @@ for (const file of files) {
     console.log(`FAIL ${relative(repoRoot, file)}`);
     const lines = tree.split("\n").filter((line) => /ERROR|MISSING/.test(line));
     for (const line of lines.slice(0, 5)) console.log(`    ${line.trim()}`);
-    if (result.status !== 0 && lines.length === 0) console.log(result.stderr.trim().split("\n").slice(-3).join("\n"));
+    if (result.status !== 0 && lines.length === 0)
+      console.log(result.stderr.trim().split("\n").slice(-3).join("\n"));
   }
 }
 
-console.log(`${files.length - failures}/${files.length} files parsed without errors`);
+console.log(
+  `${files.length - failures}/${files.length} files parsed without errors`,
+);
 process.exit(failures === 0 ? 0 : 1);

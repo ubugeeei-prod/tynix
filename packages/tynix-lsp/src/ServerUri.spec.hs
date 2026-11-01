@@ -26,7 +26,8 @@ spec = do
       uriPath "file:///tmp/main.tynix" `shouldBe` "/tmp/main.tynix"
 
     it "round-trips through percent decoding" $
-      uriPath "file:///tmp/with%20space/main.tynix" `shouldBe` "/tmp/with space/main.tynix"
+      uriPath "file:///tmp/with%20space/main.tynix"
+        `shouldBe` "/tmp/with space/main.tynix"
 
     it "tolerates a localhost authority" $
       uriPath "file://localhost/tmp/main.tynix" `shouldBe` "/tmp/main.tynix"

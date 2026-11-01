@@ -1,9 +1,9 @@
 # Fourmolu style configuration for tynix.
 #
-# These values reproduce the formatting the Haskell sources were originally
-# written in, so `fourmolu --mode check` (run in CI) and `fourmolu --mode
-# inplace` (the `fmt:haskell` task) agree with the committed tree.
+# Keep declarations and applications within a readable measure. CI and the
+# fmt:haskell task use this same configuration.
 indentation: 2
+column-limit: 80
 comma-style: trailing
 haddock-style: single-line
 import-export-style: trailing

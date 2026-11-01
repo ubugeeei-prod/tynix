@@ -29,7 +29,12 @@ import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Driver (Analysis)
-import Server (findDefinitionRange, findFieldRange, textRangeToUtf16Columns, wordAt)
+import Server
+  ( findDefinitionRange,
+    findFieldRange,
+    textRangeToUtf16Columns,
+    wordAt,
+  )
 import SessionSymbols (documentIndexedSymbols, workspaceIndexedSymbols)
 import SessionText (definitionSpans, fieldSpans, wordSpans)
 import SessionTypes
@@ -42,9 +47,12 @@ import SessionTypes
 -- | Filter the workspace document list to only those mentioned by the
 -- reference target. Useful when iterating files to compute references /
 -- rename edits.
-workspaceDocumentsForTarget :: [WorkspaceDocument] -> ReferenceTarget -> [WorkspaceDocument]
+workspaceDocumentsForTarget ::
+  [WorkspaceDocument] -> ReferenceTarget -> [WorkspaceDocument]
 workspaceDocumentsForTarget workspace target =
-  filter (\doc -> workspaceDocumentFile doc `elem` referenceTargetFiles target) workspace
+  filter
+    (\doc -> workspaceDocumentFile doc `elem` referenceTargetFiles target)
+    workspace
 
 -- | All ranges in @content@ matching @symbol@ under the given match mode.
 --
@@ -77,7 +85,8 @@ allFieldRanges content symbol =
     ( \(lineNo, line) ->
         map
           ( \startOffset ->
-              let (startChar, endChar) = textRangeToUtf16Columns line startOffset (startOffset + Text.length symbol)
+              let endOffset = startOffset + Text.length symbol
+                  (startChar, endChar) = textRangeToUtf16Columns line startOffset endOffset
                in (lineNo, startChar, endChar)
           )
           (fieldSpans line symbol)
@@ -90,7 +99,8 @@ allWordRanges content symbol =
     ( \(lineNo, line) ->
         map
           ( \startOffset ->
-              let (startChar, endChar) = textRangeToUtf16Columns line startOffset (startOffset + Text.length symbol)
+              let endOffset = startOffset + Text.length symbol
+                  (startChar, endChar) = textRangeToUtf16Columns line startOffset endOffset
                in (lineNo, startChar, endChar)
           )
           (wordSpans line symbol)
@@ -119,7 +129,9 @@ resolveDefinitionLocation file content workspace builtinsFile result lineNo char
       parts = filter (not . Text.null) (Text.splitOn "." symbol)
       workspaceSymbols = workspaceIndexedSymbols workspace
       currentDefinitions = documentIndexedSymbols file content result
-      currentFieldTarget name = (\(targetLine, startChar, endChar) -> (file, targetLine, startChar, endChar)) <$> (findFieldRange content name <|> findDefinitionRange content name)
+      currentFieldTarget name =
+        (\(targetLine, startChar, endChar) -> (file, targetLine, startChar, endChar))
+          <$> (findFieldRange content name <|> findDefinitionRange content name)
       uniqueWorkspaceTarget name =
         case filter (\entry -> indexedSymbolName entry == name) workspaceSymbols of
           [entry] ->
@@ -137,12 +149,14 @@ resolveDefinitionLocation file content workspace builtinsFile result lineNo char
             let targetDoc = find (\doc -> workspaceDocumentFile doc == targetFile) workspace
              in case targetDoc of
                   Just doc ->
-                    (\(targetLine, startChar, endChar) -> (targetFile, targetLine, startChar, endChar))
+                    ( \(targetLine, startChar, endChar) -> (targetFile, targetLine, startChar, endChar)
+                    )
                       <$> findDefinitionRange (workspaceDocumentContent doc) member
                   Nothing -> Nothing
         [name]
           | any (\entry -> indexedSymbolName entry == name) currentDefinitions ->
-              (\(targetLine, startChar, endChar) -> (file, targetLine, startChar, endChar)) <$> findDefinitionRange content name
+              (\(targetLine, startChar, endChar) -> (file, targetLine, startChar, endChar))
+                <$> findDefinitionRange content name
           | otherwise -> uniqueWorkspaceTarget name
         _
           | Just fieldName <- listToMaybe (reverse parts) ->
@@ -166,7 +180,12 @@ resolveReferenceTarget file content workspace builtinsFile result lineNo charNo 
       currentSymbols = documentIndexedSymbols file content result
       workspaceSymbols = workspaceIndexedSymbols workspace
       currentFileOnly name =
-        Just ReferenceTarget{referenceTargetFiles = [file], referenceTargetNeedle = name, referenceTargetMode = WholeWordMatch}
+        Just
+          ReferenceTarget
+            { referenceTargetFiles = [file],
+              referenceTargetNeedle = name,
+              referenceTargetMode = WholeWordMatch
+            }
       workspaceField name =
         Just
           ReferenceTarget
@@ -184,7 +203,8 @@ resolveReferenceTarget file content workspace builtinsFile result lineNo charNo 
             Just _ -> workspaceField member
             Nothing -> Nothing
         [name]
-          | any (\entry -> indexedSymbolName entry == name) currentSymbols -> currentFileOnly name
+          | any (\entry -> indexedSymbolName entry == name) currentSymbols ->
+              currentFileOnly name
           | ".d.tynix" `isSuffixOf` file -> uniqueWorkspace name <|> currentFileOnly name
           | otherwise -> currentFileOnly name
         _

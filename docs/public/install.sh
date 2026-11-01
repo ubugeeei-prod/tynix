@@ -205,6 +205,30 @@ sha256_of() {
   fi
 }
 
+read_expected_checksum() {
+  expected="$(awk -v name="$2" '$2 == name {print $1}' "$1" | head -n 1)"
+  if [ -z "$expected" ]; then
+    expected="$(awk 'NR == 1 {print $1}' "$1")"
+  fi
+  expected="$(printf '%s' "$expected" | tr 'A-F' 'a-f')"
+  case "$expected" in
+    *[!0-9a-f]* | "") die "malformed checksum file $(basename "$1")" ;;
+  esac
+  [ "${#expected}" -eq 64 ] || die "malformed checksum file $(basename "$1")"
+  printf '%s' "$expected"
+}
+
+verify_archive_checksum() {
+  expected="$(read_expected_checksum "$2" "$(basename "$1")")"
+  actual="$(sha256_of "$1")"
+  if [ "$actual" != "$expected" ]; then
+    die "checksum mismatch for $(basename "$1")
+  expected: $expected
+  actual:   $actual"
+  fi
+  say "checksum verified ($actual)"
+}
+
 # --- install / uninstall -----------------------------------------------------
 
 path_hint() {
@@ -291,23 +315,7 @@ do_install() {
   download "$base/$checksum" "$tmp_dir/$checksum" ||
     die "failed to download $base/$checksum"
 
-  expected="$(awk -v name="$archive" '$2 == name {print $1}' "$tmp_dir/$checksum" | head -n 1)"
-  if [ -z "$expected" ]; then
-    expected="$(awk 'NR == 1 {print $1}' "$tmp_dir/$checksum")"
-  fi
-  expected="$(printf '%s' "$expected" | tr 'A-F' 'a-f')"
-  case "$expected" in
-    *[!0-9a-f]* | "") die "malformed checksum file $checksum" ;;
-  esac
-  [ "${#expected}" -eq 64 ] || die "malformed checksum file $checksum"
-
-  actual="$(sha256_of "$tmp_dir/$archive")"
-  if [ "$actual" != "$expected" ]; then
-    die "checksum mismatch for $archive
-  expected: $expected
-  actual:   $actual"
-  fi
-  say "checksum verified ($actual)"
+  verify_archive_checksum "$tmp_dir/$archive" "$tmp_dir/$checksum"
 
   mkdir -p "$tmp_dir/extract"
   tar -xzf "$tmp_dir/$archive" -C "$tmp_dir/extract" || die "failed to extract $archive"

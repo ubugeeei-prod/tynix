@@ -48,6 +48,9 @@ jobs:
       - name: Validate release metadata
         run: nix develop --accept-flake-config --command node --experimental-strip-types ./scripts/check-version-sync.ts
 
+      - name: Test development script helpers
+        run: nix develop --accept-flake-config --command node --experimental-strip-types --test scripts/utils.spec.ts
+
       - name: Check the embedded builtins prelude is up to date
         run: nix develop --accept-flake-config --command node --experimental-strip-types ./scripts/generate-prelude.ts --check
 
@@ -484,6 +487,9 @@ jobs:
 
       - name: Install workspace dependencies
         run: nix develop --accept-flake-config --command pnpm install --frozen-lockfile
+
+      - name: Check shared source formatting
+        run: nix develop --accept-flake-config --command node --experimental-strip-types scripts/format-source.ts --check
 
       - name: Check VS Code extension formatting
         run: nix develop --accept-flake-config --command pnpm --filter tynix fmt

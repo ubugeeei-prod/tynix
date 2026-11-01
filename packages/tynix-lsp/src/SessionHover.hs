@@ -54,14 +54,25 @@ hoverAt env ctx off = do
       | Just alias <- Map.lookup (tokText t) aliases =
           Just (code (renderAlias alias), localAliasDoc (tokText t))
       | Just b <- typeBinder (tokText t) BindTypeAlias =
-          Just (code ("type " <> binderName b <> maybe "" (" = " <>) (binderAnnotation b)), binderDoc ctx b)
+          Just
+            ( code ("type " <> binderName b <> maybe "" (" = " <>) (binderAnnotation b)),
+              binderDoc ctx b
+            )
       | Just _ <- typeBinder (tokText t) BindTypeParam =
           Just (code ("(type parameter) " <> tokText t), Nothing)
-      | Just doc <- lookup (tokText t) builtinTypeNames = Just (code (tokText t), Just doc)
-      | Just doc <- lookup (tokText t) typeKeywords = Just (code (tokText t), Just doc)
+      | Just doc <- lookup (tokText t) builtinTypeNames =
+          Just (code (tokText t), Just doc)
+      | Just doc <- lookup (tokText t) typeKeywords =
+          Just (code (tokText t), Just doc)
       | otherwise = Nothing
     typeBinder name kind =
-      case [b | b <- scanBinders scan, binderName b == name, binderKind b == kind, binderScopeStart b <= off, off <= binderScopeEnd b] of
+      case [ b
+           | b <- scanBinders scan,
+             binderName b == name,
+             binderKind b == kind,
+             binderScopeStart b <= off,
+             off <= binderScopeEnd b
+           ] of
         b : _ -> Just b
         [] -> Nothing
     localAliasDoc name = case [b | b <- scanBinders scan, binderKind b == BindTypeAlias, binderName b == name] of
@@ -73,7 +84,10 @@ hoverAt env ctx off = do
           parent = take (length path - 1) path
       start <- codeToken scan (i - 2 * (length path - 1))
       ty <- exprPathType ctx (tokStart start) path
-      Just (withType "(field) " (tokText t) (Just ty), memberDoc env ctx (tokStart start) parent (tokText t))
+      Just
+        ( withType "(field) " (tokText t) (Just ty),
+          memberDoc env ctx (tokStart start) parent (tokText t)
+        )
 
     valueCard i t =
       case binderAtToken scan i of
@@ -86,7 +100,9 @@ hoverAt env ctx off = do
     binderCard b = (withType (kindLabel b) (binderName b) (binderType ctx b), binderDoc ctx b)
     freeDoc name
       | name == "builtins" = Just "The Nix `builtins` attribute set."
-      | name == "import" = Just "Load and evaluate a Nix file. Typed by matching `declare` blocks when available."
+      | name == "import" =
+          Just
+            "Load and evaluate a Nix file. Typed by matching `declare` blocks when available."
       | otherwise = Nothing
 
 kindLabel :: Binder -> Text
@@ -118,7 +134,9 @@ signatureHelpAt env ctx off =
     (path, calleeStart, argIx) <- calleeBefore scan (k + 1)
     fnTy <- exprPathType ctx calleeStart path
     let params = functionParams (ctxAliases ctx) fnTy
-        midWord = tokEnd lastTok == off && tokKind lastTok `elem` [KIdent, KNumber, KString, KPath]
+        midWord =
+          tokEnd lastTok == off
+            && tokKind lastTok `elem` [KIdent, KNumber, KString, KPath]
         active = if midWord then argIx - 1 else argIx
     if null params || active < 0 then Nothing else Just ()
     let name = Text.intercalate "." path
@@ -132,9 +150,13 @@ signatureHelpAt env ctx off =
         [ "signatures"
             .= [ object $
                    [ "label" .= (name <> " :: " <> renderType fnTy),
-                     "parameters" .= [object ["label" .= paramLabel ix ty] | (ix, ty) <- zip [0 :: Int ..] params]
+                     "parameters"
+                       .= [object ["label" .= paramLabel ix ty] | (ix, ty) <- zip [0 :: Int ..] params]
                    ]
-                     <> maybe [] (\d -> ["documentation" .= object ["kind" .= ("markdown" :: Text), "value" .= d]]) doc
+                     <> maybe
+                       []
+                       (\d -> ["documentation" .= object ["kind" .= ("markdown" :: Text), "value" .= d]])
+                       doc
                ],
           "activeSignature" .= (0 :: Int),
           "activeParameter" .= min active (length params - 1)

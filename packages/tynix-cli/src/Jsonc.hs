@@ -90,7 +90,8 @@ markComment = P $ \(rest, _) -> Right ((), (rest, True))
 -- read as an empty object, which is how editors treat a blank settings file.
 parseJsonc :: Text -> Either String ParsedJson
 parseJsonc input = do
-  (value, (rest, comments)) <- runP document (Text.dropWhile (== '\xFEFF') input, False)
+  (value, (rest, comments)) <-
+    runP document (Text.dropWhile (== '\xFEFF') input, False)
   if Text.null rest
     then Right (ParsedJson value comments)
     else Left ("unexpected trailing content near " <> show (Text.take 20 rest))
@@ -184,7 +185,9 @@ number :: P Text
 number = do
   rest <- remaining
   let lexeme = Text.takeWhile (\c -> isDigit c || c `elem` ("+-.eE" :: String)) rest
-  if Text.null lexeme then failP "expected number" else advance (Text.length lexeme) >> pure lexeme
+  if Text.null lexeme
+    then failP "expected number"
+    else advance (Text.length lexeme) >> pure lexeme
 
 stringLit :: P Text
 stringLit = expect '"' >> go []
@@ -204,9 +207,19 @@ stringLit = expect '"' >> go []
                   advance 6
                   go (Text.singleton (toEnum code) : chunk : acc)
             Just (e, _)
-              | Just c <- lookup e simpleEscapes -> advance 2 >> go (Text.singleton c : chunk : acc)
+              | Just c <- lookup e simpleEscapes ->
+                  advance 2 >> go (Text.singleton c : chunk : acc)
             _ -> failP "invalid string escape"
-    simpleEscapes = [('"', '"'), ('\\', '\\'), ('/', '/'), ('b', '\b'), ('f', '\f'), ('n', '\n'), ('r', '\r'), ('t', '\t')]
+    simpleEscapes =
+      [ ('"', '"'),
+        ('\\', '\\'),
+        ('/', '/'),
+        ('b', '\b'),
+        ('f', '\f'),
+        ('n', '\n'),
+        ('r', '\r'),
+        ('t', '\t')
+      ]
 
 -- Editing -----------------------------------------------------------------
 
@@ -226,7 +239,11 @@ applyJsonEdits edits root = List.foldl' (\acc edit -> acc >>= applyOne edit) (Ri
             | otherwise -> Right (JArray (items <> [value]))
           Just _ -> Left ("expected an array at " <> renderPath path)
 
-updateAt :: [Text] -> (Maybe JValue -> Either String JValue) -> JValue -> Either String JValue
+updateAt ::
+  [Text] ->
+  (Maybe JValue -> Either String JValue) ->
+  JValue ->
+  Either String JValue
 updateAt path f = go [] path
   where
     go seen keys value =
@@ -256,8 +273,13 @@ renderPath keys = Text.unpack (Text.intercalate " > " keys)
 -- spaces) so rewrites keep the file's style.
 detectIndent :: Text -> Text
 detectIndent content =
-  case [Text.takeWhile isIndent line | line <- Text.lines content, let ws = Text.takeWhile isIndent line, not (Text.null ws), not (Text.null (Text.strip line))] of
-    first : _ -> first
+  case [ Text.takeWhile isIndent line
+       | line <- Text.lines content,
+         let ws = Text.takeWhile isIndent line,
+         not (Text.null ws),
+         not (Text.null (Text.strip line))
+       ] of
+    indentation : _ -> indentation
     [] -> "  "
   where
     isIndent c = c == ' ' || c == '\t'
@@ -272,7 +294,9 @@ renderJson unit value = go 0 value <> "\n"
       JArray [] -> "[]"
       JObject fields ->
         "{\n"
-          <> Text.intercalate ",\n" [pad (depth + 1) <> quote k <> ": " <> go (depth + 1) v | (k, v) <- fields]
+          <> Text.intercalate
+            ",\n"
+            [pad (depth + 1) <> quote k <> ": " <> go (depth + 1) v | (k, v) <- fields]
           <> "\n"
           <> pad depth
           <> "}"
@@ -298,5 +322,6 @@ quote s = "\"" <> Text.concatMap escape s <> "\""
       '\r' -> "\\r"
       '\t' -> "\\t"
       c
-        | ord c < 0x20 -> "\\u" <> Text.justifyRight 4 '0' (Text.pack (showHex (ord c) ""))
+        | ord c < 0x20 ->
+            "\\u" <> Text.justifyRight 4 '0' (Text.pack (showHex (ord c) ""))
         | otherwise -> Text.singleton c

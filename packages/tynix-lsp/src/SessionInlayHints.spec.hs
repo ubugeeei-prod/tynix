@@ -107,7 +107,10 @@ spec = do
                         )
                     )
               }
-          analysis = stubAnalysis program (Map.fromList [("a", Scheme [] tInt), ("b", Scheme [] tInt)])
+          analysis =
+            stubAnalysis
+              program
+              (Map.fromList [("a", Scheme [] tInt), ("b", Scheme [] tInt)])
           hints = inlayHintsFor content (Right analysis)
       hints `shouldBe` [InlayHint 1 3 ":: Int", InlayHint 2 3 ":: Int"]
 

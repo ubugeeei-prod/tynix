@@ -53,7 +53,15 @@ import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
 import Jsonc
 import Project (writeFileAtomic)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, findExecutable, getCurrentDirectory, getHomeDirectory, makeAbsolute)
+import System.Directory
+  ( createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    findExecutable,
+    getCurrentDirectory,
+    getHomeDirectory,
+    makeAbsolute,
+  )
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (makeRelative, takeDirectory, (</>))
@@ -96,7 +104,13 @@ editorFromName raw =
     "nvim" -> Right Neovim
     "helix" -> Right Helix
     "hx" -> Right Helix
-    _ -> Left ("unknown editor '" <> raw <> "'; expected one of: " <> Text.unpack (Text.intercalate ", " (map editorName allEditors)))
+    _ ->
+      Left
+        ( "unknown editor '"
+            <> raw
+            <> "'; expected one of: "
+            <> Text.unpack (Text.intercalate ", " (map editorName allEditors))
+        )
 
 -- | Executables that identify an editor, in lookup order.
 editorCliCandidates :: Editor -> [String]
@@ -185,7 +199,8 @@ defaultIdeEnv = do
 -- CLI cannot hang the installer.
 runProcessWithTimeout :: FilePath -> [String] -> IO (ExitCode, String, String)
 runProcessWithTimeout cmd args = do
-  result <- try @IOException (timeout 60000000 (readProcessWithExitCode cmd args ""))
+  result <-
+    try @IOException (timeout 60000000 (readProcessWithExitCode cmd args ""))
   pure $ case result of
     Left err -> (ExitFailure 127, "", show err)
     Right Nothing -> (ExitFailure 124, "", cmd <> " timed out")
@@ -270,18 +285,27 @@ planInstall env opts = do
         (Nothing, Just "") -> []
         (Nothing, _) ->
           [ StepWarn
-              "tynix-lsp was not found on PATH or in a Nix profile; the editor will look it up at startup. Install it with `nix profile install github:ubugeeei-prod/tynix#tynix-lsp`."
+              "tynix-lsp was not found on PATH or in a Nix profile; the editor \
+              \will look it up at startup. Install it with `nix profile install \
+              \github:ubugeeei-prod/tynix#tynix-lsp`."
           ]
         (Just path, _)
           | "/nix/store/" `isPrefixOf` path ->
-              [StepWarn ("tynix-lsp resolves to " <> Text.pack path <> ", a Nix store path that disappears after garbage collection; prefer a profile install or pass --lsp-path.")]
+              [ StepWarn
+                  ( "tynix-lsp resolves to "
+                      <> Text.pack path
+                      <> ", a Nix store path that disappears after garbage collection; \
+                         \prefer a profile install or pass --lsp-path."
+                  )
+              ]
           | otherwise -> []
   extensionSteps <-
     if installExtension opts && isVSCodeFamily editor
       then planExtension env editor
       else pure []
   fileSteps <- planEditorFiles env opts scope lsp
-  pure (header, lspSteps <> extensionSteps <> fileSteps <> editorNotes editor scope)
+  pure
+    (header, lspSteps <> extensionSteps <> fileSteps <> editorNotes editor scope)
 
 planExtension :: IdeEnv -> Editor -> IO [Step]
 planExtension env editor = do
@@ -300,29 +324,43 @@ planExtension env editor = do
       pure $
         if installed
           then [StepOk ("extension " <> extensionId <> " is already installed")]
-          else [StepRun path ["--install-extension", Text.unpack extensionId] ("install extension " <> extensionId)]
+          else
+            [ StepRun
+                path
+                ["--install-extension", Text.unpack extensionId]
+                ("install extension " <> extensionId)
+            ]
 
 manualExtensionHint :: Editor -> Text
 manualExtensionHint = \case
   VSCode ->
     "Install it from https://marketplace.visualstudio.com/items?itemName=ubugeeei.tynix, or run \"Shell Command: Install 'code' command in PATH\" from the command palette and re-run."
-  Cursor -> "Install it from the Extensions view (search \"ubugeeei.tynix\", served by https://open-vsx.org/extension/ubugeeei/tynix), or add the `cursor` shell command and re-run."
-  VSCodium -> "Install it from https://open-vsx.org/extension/ubugeeei/tynix, or put `codium` on PATH and re-run."
+  Cursor ->
+    "Install it from the Extensions view (search \"ubugeeei.tynix\", \
+    \served by https://open-vsx.org/extension/ubugeeei/tynix), or add \
+    \the `cursor` shell command and re-run."
+  VSCodium ->
+    "Install it from https://open-vsx.org/extension/ubugeeei/tynix, or \
+    \put `codium` on PATH and re-run."
   _ -> ""
 
 firstExecutable :: IdeEnv -> [String] -> IO (Maybe FilePath)
 firstExecutable env = \case
   [] -> pure Nothing
-  name : rest -> ideFindExecutable env name >>= maybe (firstExecutable env rest) (pure . Just)
+  name : rest ->
+    ideFindExecutable env name >>= maybe (firstExecutable env rest) (pure . Just)
 
 extensionInstalledWith :: IdeEnv -> FilePath -> IO Bool
 extensionInstalledWith env cli = do
   (code, out, _) <- ideRunProcess env cli ["--list-extensions"]
   pure $
     code == ExitSuccess
-      && any ((== Text.toLower extensionId) . Text.toLower . Text.strip) (Text.lines (Text.pack out))
+      && any
+        ((== Text.toLower extensionId) . Text.toLower . Text.strip)
+        (Text.lines (Text.pack out))
 
-planEditorFiles :: IdeEnv -> InstallOptions -> ResolvedScope -> Maybe FilePath -> IO [Step]
+planEditorFiles ::
+  IdeEnv -> InstallOptions -> ResolvedScope -> Maybe FilePath -> IO [Step]
 planEditorFiles env opts scope lsp =
   case installEditor opts of
     editor
@@ -332,7 +370,11 @@ planEditorFiles env opts scope lsp =
                 AtGlobal -> vscodeUserDir env editor </> "settings.json"
           settings <- jsonStep settingsPath (vscodeSettingsEdits lsp)
           extensions <- case scope of
-            AtProject dir -> pure <$> jsonStep (dir </> ".vscode" </> "extensions.json") [AppendUnique ["recommendations"] (JString extensionId)]
+            AtProject dir ->
+              pure
+                <$> jsonStep
+                  (dir </> ".vscode" </> "extensions.json")
+                  [AppendUnique ["recommendations"] (JString extensionId)]
             AtGlobal -> pure []
           pure (settings : extensions)
     Zed -> do
@@ -345,7 +387,9 @@ planEditorFiles env opts scope lsp =
             AtProject dir -> dir </> ".nvim.lua"
             AtGlobal -> neovimConfigDir env </> "after" </> "plugin" </> "tynix.lua"
       existing <- readIfExists path
-      pure [StepFile (planManagedFile (installForce opts) path existing (neovimSnippet lsp))]
+      pure
+        [ StepFile (planManagedFile (installForce opts) path existing (neovimSnippet lsp))
+        ]
     Helix -> do
       let path = case scope of
             AtProject dir -> dir </> ".helix" </> "languages.toml"
@@ -362,11 +406,23 @@ editorNotes :: Editor -> ResolvedScope -> [Step]
 editorNotes editor scope =
   case editor of
     Zed ->
-      [ StepNote "Zed installs the tynix extension on its next start via auto_install_extensions. Until tynix is listed in the Zed extension registry, install it with \"zed: install dev extension\" pointing at editors/zed (or run `vp ide` in a tynix checkout)."
+      [ StepNote
+          "Zed installs the tynix extension on its next start via \
+          \auto_install_extensions. Until tynix is listed in the Zed \
+          \extension registry, install it with \"zed: install dev extension\" \
+          \pointing at editors/zed (or run `vp ide` in a tynix checkout)."
       ]
     Neovim
-      | AtProject _ <- scope -> [StepNote "Project-local .nvim.lua files only load with `:set exrc` (Neovim 0.9+ asks you to trust the file once)."]
-    Helix -> [StepNote "Helix reuses its built-in Nix tree-sitter grammar for tynix; run `hx --health tynix` to confirm the language server is found."]
+      | AtProject _ <- scope ->
+          [ StepNote
+              "Project-local .nvim.lua files only load with `:set exrc` (Neovim \
+              \0.9+ asks you to trust the file once)."
+          ]
+    Helix ->
+      [ StepNote
+          "Helix reuses its built-in Nix tree-sitter grammar for tynix; run \
+          \`hx --health tynix` to confirm the language server is found."
+      ]
     _ -> []
 
 readIfExists :: FilePath -> IO (Maybe Text)
@@ -382,7 +438,10 @@ vscodeUserDir :: IdeEnv -> Editor -> FilePath
 vscodeUserDir env editor =
   case ideOs env of
     "darwin" -> ideHome env </> "Library" </> "Application Support" </> app </> "User"
-    "mingw32" -> fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env) </> app </> "User"
+    "mingw32" ->
+      fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env)
+        </> app
+        </> "User"
     _ -> ideConfigHome env </> app </> "User"
   where
     app = case editor of
@@ -393,7 +452,8 @@ vscodeUserDir env editor =
 zedConfigDir :: IdeEnv -> FilePath
 zedConfigDir env =
   case ideOs env of
-    "mingw32" -> fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env) </> "Zed"
+    "mingw32" ->
+      fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env) </> "Zed"
     _ -> ideConfigHome env </> "zed"
 
 zedSupportDir :: IdeEnv -> FilePath
@@ -412,7 +472,8 @@ neovimConfigDir env =
 helixConfigDir :: IdeEnv -> FilePath
 helixConfigDir env =
   case ideOs env of
-    "mingw32" -> fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env) </> "helix"
+    "mingw32" ->
+      fromMaybe (ideHome env </> "AppData" </> "Roaming") (ideAppData env) </> "helix"
     _ -> ideConfigHome env </> "helix"
 
 -- Settings content -----------------------------------------------------------
@@ -431,7 +492,9 @@ vscodeSettingsEdits lsp =
 zedSettingsEdits :: Maybe FilePath -> [JsonEdit]
 zedSettingsEdits lsp =
   SetKey ["auto_install_extensions", "tynix"] (JBool True)
-    : [SetKey ["lsp", "tynix-lsp", "binary", "path"] (JString (Text.pack path)) | Just path <- [lsp]]
+    : [ SetKey ["lsp", "tynix-lsp", "binary", "path"] (JString (Text.pack path))
+      | Just path <- [lsp]
+      ]
 
 -- | Plan a JSONC settings merge. Existing keys are preserved; when the file
 -- holds comments (which a rewrite would drop) the change is only made with
@@ -439,25 +502,40 @@ zedSettingsEdits lsp =
 planJsonFile :: Bool -> FilePath -> Maybe Text -> [JsonEdit] -> FileChange
 planJsonFile force path existing edits =
   case existing of
-    Nothing -> either (\err -> FileManual path (Text.pack err) "") (FileCreate path . renderJson "  ") (applyJsonEdits edits (JObject []))
+    Nothing ->
+      either
+        (\err -> FileManual path (Text.pack err) "")
+        (FileCreate path . renderJson "  ")
+        (applyJsonEdits edits (JObject []))
     Just content ->
-      case parseJsonc content of
-        Left err -> FileManual path ("could not parse the existing file (" <> Text.pack err <> "); add these settings by hand") snippet
-        Right parsed ->
-          case applyJsonEdits edits (parsedValue parsed) of
-            Left err -> FileManual path ("could not merge safely (" <> Text.pack err <> "); add these settings by hand") snippet
-            Right updated
-              | updated == parsedValue parsed -> FileUnchanged path
-              | parsedHasComments parsed && not force ->
-                  FileManual path "the file contains comments that a rewrite would drop; add these settings by hand or re-run with --force (a .bak backup is written first)" snippet
-              | otherwise ->
-                  FileUpdate
-                    path
-                    content
-                    (renderJson (detectIndent content) updated)
-                    (if parsedHasComments parsed then Just (path <> ".bak") else Nothing)
+      case mergeExisting content of
+        Left reason -> FileManual path reason snippet
+        Right (parsed, updated)
+          | updated == parsedValue parsed -> FileUnchanged path
+          | parsedHasComments parsed && not force ->
+              FileManual path commentsWarning snippet
+          | otherwise ->
+              FileUpdate
+                path
+                content
+                (renderJson (detectIndent content) updated)
+                (if parsedHasComments parsed then Just (path <> ".bak") else Nothing)
   where
     snippet = either (const "") (renderJson "  ") (applyJsonEdits edits (JObject []))
+    mergeExisting content = do
+      parsed <- either (Left . parseFailure) Right (parseJsonc content)
+      updated <-
+        either (Left . mergeFailure) Right (applyJsonEdits edits (parsedValue parsed))
+      pure (parsed, updated)
+    parseFailure err =
+      "could not parse the existing file ("
+        <> Text.pack err
+        <> "); add these settings by hand"
+    mergeFailure err =
+      "could not merge safely (" <> Text.pack err <> "); add these settings by hand"
+    commentsWarning =
+      "the file contains comments that a rewrite would drop; "
+        <> "add these settings by hand or re-run with --force (a .bak backup is written first)"
 
 -- | Marker identifying files generated (and therefore owned) by this command.
 managedMarker :: Text
@@ -471,9 +549,15 @@ planManagedFile force path existing content =
     Nothing -> FileCreate path content
     Just current
       | current == content -> FileUnchanged path
-      | managedMarker `Text.isInfixOf` current -> FileUpdate path current content Nothing
+      | managedMarker `Text.isInfixOf` current ->
+          FileUpdate path current content Nothing
       | force -> FileUpdate path current content (Just (path <> ".bak"))
-      | otherwise -> FileManual path "the file exists and was not generated by tynix; merge this by hand or re-run with --force (a .bak backup is written first)" content
+      | otherwise ->
+          FileManual
+            path
+            "the file exists and was not generated by tynix; merge this by hand \
+            \or re-run with --force (a .bak backup is written first)"
+            content
 
 neovimSnippet :: Maybe FilePath -> Text
 neovimSnippet lsp =
@@ -495,7 +579,8 @@ neovimSnippet lsp =
       "  -- The editors/neovim plugin is on the runtimepath: let it drive.",
       "  tynix.setup({ cmd = cmd, root_markers = root_markers, filetypes = filetypes })",
       "elseif vim.lsp.config and vim.lsp.enable then",
-      "  vim.lsp.config(\"tynix\", { cmd = cmd, filetypes = filetypes, root_markers = root_markers })",
+      "  vim.lsp.config(\"tynix\", { cmd = cmd, filetypes = filetypes, \
+      \root_markers = root_markers })",
       "  vim.lsp.enable(\"tynix\")",
       "else",
       "  vim.api.nvim_create_autocmd(\"FileType\", {",
@@ -577,12 +662,20 @@ scanHelix content = go Nothing (False, False) (map Text.strip (Text.lines conten
     go table (lang, server) (line : rest)
       | "[" `Text.isPrefixOf` line =
           let header = Text.filter (not . isSpace) (Text.takeWhile (/= '#') line)
-              server' = server || header `elem` ["[language-server.tynix-lsp]", "[language-server.\"tynix-lsp\"]"]
+              server' =
+                server
+                  || header `elem` ["[language-server.tynix-lsp]", "[language-server.\"tynix-lsp\"]"]
            in go (Just header) (lang, server') rest
       | otherwise =
           let compact = Text.filter (not . isSpace) (Text.takeWhile (/= '#') line)
               lang' = lang || (table == Just "[[language]]" && compact == "name=\"tynix\"")
-              server' = server || (table == Just "[language-server]" && ("tynix-lsp=" `Text.isPrefixOf` compact || "\"tynix-lsp\"=" `Text.isPrefixOf` compact))
+              server' =
+                server
+                  || ( table == Just "[language-server]"
+                         && ( "tynix-lsp=" `Text.isPrefixOf` compact
+                                || "\"tynix-lsp\"=" `Text.isPrefixOf` compact
+                            )
+                     )
            in go table (lang', server') rest
 
 -- Applying ------------------------------------------------------------------
@@ -597,7 +690,13 @@ applySteps env steps = do
       pure $ case code of
         ExitSuccess -> (["✓ " <> label <> " (" <> Text.pack cmd <> ")"], True)
         ExitFailure n ->
-          ( ["✗ " <> label <> " failed: `" <> Text.unwords (map Text.pack (cmd : args)) <> "` exited with " <> Text.pack (show n)]
+          ( [ "✗ "
+                <> label
+                <> " failed: `"
+                <> Text.unwords (map Text.pack (cmd : args))
+                <> "` exited with "
+                <> Text.pack (show n)
+            ]
               <> map ("    " <>) (Text.lines (Text.strip (Text.pack (err <> out)))),
             False
           )
@@ -610,12 +709,27 @@ applyFileChange change =
   case change of
     FileCreate path content -> write path content >>= \r -> pure (r ("✓ created " <> Text.pack path))
     FileUpdate path old new backup -> do
-      backedUp <- maybe (pure (Right ())) (\b -> try @IOException (TextIO.writeFile b old)) backup
+      backedUp <-
+        maybe (pure (Right ())) (\b -> try @IOException (TextIO.writeFile b old)) backup
       case backedUp of
-        Left err -> pure (["✗ could not write backup for " <> Text.pack path <> ": " <> Text.pack (show err)], False)
+        Left err ->
+          pure
+            ( [ "✗ could not write backup for "
+                  <> Text.pack path
+                  <> ": "
+                  <> Text.pack (show err)
+              ],
+              False
+            )
         Right () ->
           write path new >>= \r ->
-            pure (r ("✓ updated " <> Text.pack path <> maybe "" (\b -> " (backup: " <> Text.pack b <> ")") backup))
+            pure
+              ( r
+                  ( "✓ updated "
+                      <> Text.pack path
+                      <> maybe "" (\b -> " (backup: " <> Text.pack b <> ")") backup
+                  )
+              )
     FileUnchanged path -> pure (["= " <> Text.pack path <> " already up to date"], True)
     FileManual{} -> pure (renderFileChange False change, True)
   where
@@ -624,7 +738,10 @@ applyFileChange change =
         createDirectoryIfMissing True (takeDirectory path)
         writeFileAtomic path content
       pure $ \okLine -> case result of
-        Left err -> (["✗ could not write " <> Text.pack path <> ": " <> Text.pack (show err)], False)
+        Left err ->
+          ( ["✗ could not write " <> Text.pack path <> ": " <> Text.pack (show err)],
+            False
+          )
         Right () -> ([okLine], True)
 
 renderStatic :: Step -> [Text]
@@ -647,9 +764,13 @@ renderPlan header steps =
 renderFileChange :: Bool -> FileChange -> [Text]
 renderFileChange dry = \case
   FileCreate path content ->
-    [(if dry then "would create " else "created ") <> Text.pack path] <> indent (map ("+ " <>) (Text.lines content))
+    [(if dry then "would create " else "created ") <> Text.pack path]
+      <> indent (map ("+ " <>) (Text.lines content))
   FileUpdate path old new backup ->
-    [(if dry then "would update " else "updated ") <> Text.pack path <> maybe "" (\b -> " (backup: " <> Text.pack b <> ")") backup]
+    [ (if dry then "would update " else "updated ")
+        <> Text.pack path
+        <> maybe "" (\b -> " (backup: " <> Text.pack b <> ")") backup
+    ]
       <> indent (lineDiff old new)
   FileUnchanged path -> ["= " <> Text.pack path <> " already up to date"]
   FileManual path reason snippet ->
@@ -709,7 +830,8 @@ diffLines xs ys = walk 0 0
         ]
     walk i j
       | i < n && j < m && xa ! i == ya ! j = (' ', xa ! i) : walk (i + 1) (j + 1)
-      | i < n && (j == m || table ! (i + 1, j) >= table ! (i, j + 1)) = ('-', xa ! i) : walk (i + 1) j
+      | i < n && (j == m || table ! (i + 1, j) >= table ! (i, j + 1)) =
+          ('-', xa ! i) : walk (i + 1) j
       | j < m = ('+', ya ! j) : walk i (j + 1)
       | otherwise = []
 
@@ -762,8 +884,13 @@ editorIntegrationStatus env editor
       traverse (extensionInstalledWith env) cli
   | otherwise =
       case editor of
-        Zed -> Just <$> doesDirectoryExist (zedSupportDir env </> "extensions" </> "installed" </> "tynix")
-        Neovim -> Just <$> doesFileExist (neovimConfigDir env </> "after" </> "plugin" </> "tynix.lua")
+        Zed ->
+          Just
+            <$> doesDirectoryExist
+              (zedSupportDir env </> "extensions" </> "installed" </> "tynix")
+        Neovim ->
+          Just
+            <$> doesFileExist (neovimConfigDir env </> "after" </> "plugin" </> "tynix.lua")
         Helix -> do
           content <- readIfExists (helixConfigDir env </> "languages.toml")
           pure (Just (maybe False (uncurry (&&) . scanHelix) content))

@@ -160,23 +160,46 @@ constrainResolved ctx actual expected = do
     (TTypeList xs, TTypeList ys)
       | length xs == length ys ->
           TTypeList <$> zipWithM (constrain ctx) xs ys
-    (TArrow actualArrow actualArg actualResult, TArrow expectedArrow expectedArg expectedResult)
-      | multiplicitySubtype (arrowMult actualArrow) (arrowMult expectedArrow) -> do
-          constrainEffects (arrowEffects actualArrow) (arrowEffects expectedArrow)
-          unless (capturesWithin (arrowCaptures actualArrow) (arrowCaptures expectedArrow)) $
-            throwCheck (withCode TC0025CaptureNotAllowed ("closure captures more than its expected type allows: " <> showType actual' <> " vs " <> showType expected'))
-          _ <- constrain ctx expectedArg actualArg
-          -- Dependent binders on either side denote the same argument.
-          let shared = TSingleton "it" expectedArg
-          _ <- constrain ctx (eraseBinder actualArrow shared actualResult) (eraseBinder expectedArrow shared expectedResult)
-          zonk expected'
-      | otherwise ->
-          throwCheck (withCode TC0026LinearityViolation ("expected a linear function (`%1 ->`), but got an unrestricted one: " <> showType actual'))
+    ( TArrow actualArrow actualArg actualResult,
+      TArrow expectedArrow expectedArg expectedResult
+      )
+        | multiplicitySubtype (arrowMult actualArrow) (arrowMult expectedArrow) -> do
+            constrainEffects (arrowEffects actualArrow) (arrowEffects expectedArrow)
+            unless
+              (capturesWithin (arrowCaptures actualArrow) (arrowCaptures expectedArrow))
+              $ throwCheck
+                ( withCode
+                    TC0025CaptureNotAllowed
+                    ( "closure captures more than its expected type allows: "
+                        <> showType actual'
+                        <> " vs "
+                        <> showType expected'
+                    )
+                )
+            _ <- constrain ctx expectedArg actualArg
+            -- Dependent binders on either side denote the same argument.
+            let shared = TSingleton "it" expectedArg
+            _ <-
+              constrain
+                ctx
+                (eraseBinder actualArrow shared actualResult)
+                (eraseBinder expectedArrow shared expectedResult)
+            zonk expected'
+        | otherwise ->
+            throwCheck
+              ( withCode
+                  TC0026LinearityViolation
+                  ( "expected a linear function (`%1 ->`), but got an unrestricted one: "
+                      <> showType actual'
+                  )
+              )
     (TOptional a, TOptional b) -> TOptional <$> constrain ctx a b
     _
       | hasUnresolvedMetas actual' expected',
-        Just (actualFields, actualTail) <- recordView (resolveHead (checkAliases ctx) actual'),
-        Just (expectedFields, expectedTail) <- recordView (resolveHead (checkAliases ctx) expected') -> do
+        Just (actualFields, actualTail) <-
+          recordView (resolveHead (checkAliases ctx) actual'),
+        Just (expectedFields, expectedTail) <-
+          recordView (resolveHead (checkAliases ctx) expected') -> do
           constrainRecord ctx actualFields actualTail expectedFields
           -- An open expected row (`{ ...r }` from a signature) captures the
           -- fields the expectation did not mention, so `r` is solved.
@@ -205,11 +228,20 @@ constrainResolved ctx actual expected = do
               constrain ctx (widenLiterals joined) valueTy $> expected'
     _ | actual' == expected' -> pure expected'
     _ | isSubtype (checkAliases ctx) actual' expected' -> pure expected'
-    _ | allowsGradualConsistency actual' expected' && isConsistent (checkAliases ctx) actual' expected' -> pure expected'
+    _
+      | allowsGradualConsistency actual' expected'
+          && isConsistent (checkAliases ctx) actual' expected' ->
+          pure expected'
     _ | hasUnresolvedMetas actual' expected' -> unify ctx actual' expected'
     _
-      | Just detail <- recordMismatchDetail (checkAliases ctx) actual' expected' -> throwCheck detail
-    _ -> throwCheck (withCode TC0013TypeMismatch ("type mismatch: " <> showType actual' <> " vs " <> showType expected'))
+      | Just detail <- recordMismatchDetail (checkAliases ctx) actual' expected' ->
+          throwCheck detail
+    _ ->
+      throwCheck
+        ( withCode
+            TC0013TypeMismatch
+            ("type mismatch: " <> showType actual' <> " vs " <> showType expected')
+        )
 
 -- | Explain why one record does not satisfy another: the first missing
 -- required field, or the first field whose type does not fit.
@@ -233,9 +265,29 @@ recordMismatchDetail aliases actual expected = do
         ]
   case (missing, wrong) of
     (name : _, _) ->
-      Just (withCode TC0009MissingField ("missing field " <> quoteName name <> ": expected " <> showType expected <> " but got " <> showType actual))
+      Just
+        ( withCode
+            TC0009MissingField
+            ( "missing field "
+                <> quoteName name
+                <> ": expected "
+                <> showType expected
+                <> " but got "
+                <> showType actual
+            )
+        )
     ([], (name, a, e) : _) ->
-      Just (withCode TC0013TypeMismatch ("type mismatch in field " <> quoteName name <> ": " <> showType a <> " vs " <> showType e))
+      Just
+        ( withCode
+            TC0013TypeMismatch
+            ( "type mismatch in field "
+                <> quoteName name
+                <> ": "
+                <> showType a
+                <> " vs "
+                <> showType e
+            )
+        )
     _ -> Nothing
   where
     isOptionalField = \case
@@ -245,7 +297,8 @@ recordMismatchDetail aliases actual expected = do
 -- | Width-subtyping obligation between record shapes that still contain
 -- metas: every expected field must be provided (unless optional). A missing
 -- field extends the actual row when its tail is still open.
-constrainRecord :: CheckContext -> Map Name Type -> Maybe Type -> Map Name Type -> InferM ()
+constrainRecord ::
+  CheckContext -> Map Name Type -> Maybe Type -> Map Name Type -> InferM ()
 constrainRecord ctx actualFields actualTail expectedFields =
   forM_ (Map.toList expectedFields) $ \(name, expectedTy) ->
     case Map.lookup name actualFields of
@@ -260,7 +313,16 @@ constrainRecord ctx actualFields actualTail expectedFields =
                 rowTail <- freshMeta
                 void (bindMeta n (TOpenRecord (Map.singleton name expectedTy) rowTail))
               Just ty | ty == tDynamic || ty == tAny -> pure ()
-              _ -> throwCheck (withCode TC0009MissingField ("missing field " <> quoteName name <> " required by " <> showType (TRecord expectedFields)))
+              _ ->
+                throwCheck
+                  ( withCode
+                      TC0009MissingField
+                      ( "missing field "
+                          <> quoteName name
+                          <> " required by "
+                          <> showType (TRecord expectedFields)
+                      )
+                  )
 
 -- | Symmetric structural unification used while solving metas.
 --
@@ -303,7 +365,11 @@ unify ctx left right = do
     _
       | Just leftList <- sequenceListView left',
         Just rightList <- sequenceListView right',
-        hasUnresolvedMetas left' right' || not (isSubtype (checkAliases ctx) left' right' || isSubtype (checkAliases ctx) right' left') ->
+        hasUnresolvedMetas left' right'
+          || not
+            ( isSubtype (checkAliases ctx) left' right'
+                || isSubtype (checkAliases ctx) right' left'
+            ) ->
           unify ctx leftList rightList
     (TArrow leftArrow a b, TArrow rightArrow c d)
       | arrowMult leftArrow == arrowMult rightArrow -> do
@@ -322,8 +388,16 @@ unify ctx left right = do
     _ | left' == right' -> pure left'
     _ | isSubtype (checkAliases ctx) left' right' -> pure right'
     _ | isSubtype (checkAliases ctx) right' left' -> pure left'
-    _ | allowsGradualConsistency left' right' && isConsistent (checkAliases ctx) left' right' -> pure (joinTypes (checkAliases ctx) left' right')
-    _ -> throwCheck (withCode TC0013TypeMismatch ("type mismatch: " <> showType left' <> " vs " <> showType right'))
+    _
+      | allowsGradualConsistency left' right'
+          && isConsistent (checkAliases ctx) left' right' ->
+          pure (joinTypes (checkAliases ctx) left' right')
+    _ ->
+      throwCheck
+        ( withCode
+            TC0013TypeMismatch
+            ("type mismatch: " <> showType left' <> " vs " <> showType right')
+        )
   where
     -- Rows unify field-wise on their common labels; each side's tail absorbs
     -- the labels only the other side has, sharing one fresh rest-row.
@@ -341,15 +415,29 @@ unify ctx left right = do
           _ <- unify ctx tailA (mkOpenRecord onlyB rest)
           _ <- unify ctx tailB (mkOpenRecord onlyA rest)
           zonk leftTy
-        _ -> throwCheck (withCode TC0014RecordMismatch ("record mismatch: " <> showType leftTy <> " vs " <> showType rightTy))
+        _ ->
+          throwCheck
+            ( withCode
+                TC0014RecordMismatch
+                ("record mismatch: " <> showType leftTy <> " vs " <> showType rightTy)
+            )
     unifyRecord a b
       | Map.keysSet b `Set.isSubsetOf` Map.keysSet a =
-          Map.traverseWithKey (\name bTy -> maybe (pure bTy) (\aTy -> unify ctx aTy bTy) (Map.lookup name a)) b
+          Map.traverseWithKey
+            (\name bTy -> maybe (pure bTy) (\aTy -> unify ctx aTy bTy) (Map.lookup name a))
+            b
             <&> TRecord
       | Map.keysSet a `Set.isSubsetOf` Map.keysSet b =
-          Map.traverseWithKey (\name aTy -> maybe (pure aTy) (unify ctx aTy) (Map.lookup name b)) a
+          Map.traverseWithKey
+            (\name aTy -> maybe (pure aTy) (unify ctx aTy) (Map.lookup name b))
+            a
             <&> TRecord
-      | otherwise = throwCheck (withCode TC0014RecordMismatch ("record mismatch: " <> showRecord a <> " vs " <> showRecord b))
+      | otherwise =
+          throwCheck
+            ( withCode
+                TC0014RecordMismatch
+                ("record mismatch: " <> showRecord a <> " vs " <> showRecord b)
+            )
 
 -- | Validate an explicit `expr as Type` assertion.
 --
@@ -376,7 +464,8 @@ checkCast ctx actual expected = do
   -- Aliases are expanded lazily, so resolve each side's head before
   -- comparing structure (`Mapper a b` must meet `Int -> Int` as a function).
   actual' <- normalizeIndexedType . resolveHead (checkAliases ctx) <$> zonk actual
-  expected' <- normalizeIndexedType . resolveHead (checkAliases ctx) <$> zonk expected
+  expected' <-
+    normalizeIndexedType . resolveHead (checkAliases ctx) <$> zonk expected
   let aliases = checkAliases ctx
   -- An opaque type is converted to and from its representation only here.
   let reveal ty = fromMaybe ty (revealOpaque aliases ty)
@@ -388,7 +477,12 @@ checkCast ctx actual expected = do
         || related (reveal actual') expected'
         || related actual' (reveal expected')
         then pure expected
-        else throwCheck (withCode TC0015InvalidCast ("invalid cast: " <> showType actual' <> " as " <> showType expected'))
+        else
+          throwCheck
+            ( withCode
+                TC0015InvalidCast
+                ("invalid cast: " <> showType actual' <> " as " <> showType expected')
+            )
 
 -- | Replace singleton literal types by their primitive base.
 widenLiterals :: Type -> Type

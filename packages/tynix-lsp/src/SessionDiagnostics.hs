@@ -68,7 +68,10 @@ diagnosticRange diagnostic = do
 -- is talking about.
 diagnosticSymbolName :: Text -> Maybe Text
 diagnosticSymbolName message =
-  case [(Text.length before, name) | q <- ["\"", "`"], before : name : _ : _ <- [Text.splitOn q message]] of
+  case [ (Text.length before, name)
+       | q <- ["\"", "`"],
+         before : name : _ : _ <- [Text.splitOn q message]
+       ] of
     [] -> Nothing
     found -> Just (snd (minimum found))
 
@@ -81,8 +84,14 @@ directiveActions file content diagnostic =
   case diagnosticRange diagnostic of
     Just (lineNo, _, _)
       | not (lineHasDirective "# @tynix-ignore" lineNo content) ->
-          [ quickFixAction "Add `# @tynix-ignore`" file [insertLineEdit lineNo "# @tynix-ignore\n"],
-            quickFixAction "Add `# @tynix-expected`" file [insertLineEdit lineNo "# @tynix-expected\n"]
+          [ quickFixAction
+              "Add `# @tynix-ignore`"
+              file
+              [insertLineEdit lineNo "# @tynix-ignore\n"],
+            quickFixAction
+              "Add `# @tynix-expected`"
+              file
+              [insertLineEdit lineNo "# @tynix-expected\n"]
           ]
       | otherwise -> []
     Nothing -> []
@@ -153,9 +162,12 @@ workspaceEdit edits =
 -- "Close enough" means edit distance ≤ @max 2 (length needle / 2)@.
 closestCandidate :: [Text] -> Text -> Maybe Text
 closestCandidate candidates needle =
-  case sortOn (\candidate -> (nameDistance needle candidate, candidate)) (filter (/= needle) candidates) of
+  case sortOn
+    (\candidate -> (nameDistance needle candidate, candidate))
+    (filter (/= needle) candidates) of
     candidate : _
-      | nameDistance needle candidate <= max 2 (Text.length needle `div` 2) -> Just candidate
+      | nameDistance needle candidate <= max 2 (Text.length needle `div` 2) ->
+          Just candidate
     _ -> Nothing
 
 -- | Plain Levenshtein distance, case-insensitive, used only for the rename
@@ -167,7 +179,13 @@ nameDistance left right = last (foldl' step [0 .. length rightChars] (zip [1 ..]
     rightChars = map toLower (Text.unpack right)
     step previousRow (rowIndex, leftChar) =
       scanl
-        (\leftCost (columnIndex, rightChar) -> minimum [leftCost + 1, previousRow !! columnIndex + 1, previousRow !! (columnIndex - 1) + substitutionCost leftChar rightChar])
+        ( \leftCost (columnIndex, rightChar) ->
+            minimum
+              [ leftCost + 1,
+                previousRow !! columnIndex + 1,
+                previousRow !! (columnIndex - 1) + substitutionCost leftChar rightChar
+              ]
+        )
         rowIndex
         (zip [1 ..] rightChars)
     substitutionCost leftChar rightChar
