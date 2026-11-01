@@ -83,7 +83,8 @@ lookupCachedDocument file (Documents docs) = Map.lookup (normalise file) docs
 -- | Insert or replace a document, preserving the previous "last good
 -- analysis" when the new analysis fails. This is how the LSP keeps
 -- showing useful hovers while the user is mid-edit.
-insertDocument :: FilePath -> Text -> Maybe (Either String Analysis) -> Documents -> Documents
+insertDocument ::
+  FilePath -> Text -> Maybe (Either String Analysis) -> Documents -> Documents
 insertDocument file content analysis (Documents docs) =
   Documents
     ( Map.insert
@@ -178,7 +179,11 @@ closeDocuments docs msg =
 
 -- | Fetch a document's current text, falling back to disk when the editor
 -- has not opened the file yet.
-loadDocumentContent :: (FilePath -> IO (Either String Text)) -> Documents -> FilePath -> IO (Either String Text)
+loadDocumentContent ::
+  (FilePath -> IO (Either String Text)) ->
+  Documents ->
+  FilePath ->
+  IO (Either String Text)
 loadDocumentContent readDocument docs file =
   maybe (readDocument file) (pure . Right) (lookupDocumentText file docs)
 
@@ -216,7 +221,11 @@ updateDocumentText docs msg = do
   let params = field "params" msg
       textDocument = params >>= field "textDocument"
       file = maybe "" (normalise . uriPath) (textDocument >>= field "uri" >>= asText)
-  base <- maybe (Left "cannot apply changes to a document that is not open") Right (lookupDocumentText file docs)
+  base <-
+    maybe
+      (Left "cannot apply changes to a document that is not open")
+      Right
+      (lookupDocumentText file docs)
   content <- applyContentChanges base params
   let previous = lookupCachedDocument file docs
       lastGood =
@@ -239,7 +248,8 @@ updateDocumentText docs msg = do
 
 -- | Record an analysis result for the given text, if the text is still
 -- current.
-storeDocumentAnalysis :: FilePath -> Text -> Either String Analysis -> Documents -> Documents
+storeDocumentAnalysis ::
+  FilePath -> Text -> Either String Analysis -> Documents -> Documents
 storeDocumentAnalysis file content result docs =
   case lookupDocumentText file docs of
     Just current | current == content -> insertDocument file content (Just result) docs

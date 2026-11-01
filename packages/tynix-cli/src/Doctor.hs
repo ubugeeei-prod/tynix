@@ -54,8 +54,24 @@ parseVersionLine output =
 -- | Run every check. @selfVersion@ is the version of the running `tynix`.
 doctorChecks :: IdeEnv -> Text -> IO [Check]
 doctorChecks env selfVersion = do
-  tynixCheck <- checkTool "tynix" "tynix" (Just "install it with `nix profile install github:ubugeeei-prod/tynix#tynix` so editors and scripts find the same version") CheckWarn
-  lspCheck <- checkTool "tynix-lsp" "tynix-lsp" (Just "install it with `nix profile install github:ubugeeei-prod/tynix#tynix-lsp`") CheckFail
+  tynixCheck <-
+    checkTool
+      "tynix"
+      "tynix"
+      ( Just
+          "install it with `nix profile install \
+          \github:ubugeeei-prod/tynix#tynix` so editors and scripts find the \
+          \same version"
+      )
+      CheckWarn
+  lspCheck <-
+    checkTool
+      "tynix-lsp"
+      "tynix-lsp"
+      ( Just
+          "install it with `nix profile install github:ubugeeei-prod/tynix#tynix-lsp`"
+      )
+      CheckFail
   projectCheck <- checkProject
   editorChecks <- checkEditors
   nixCheck <- checkNix
@@ -69,11 +85,13 @@ doctorChecks env selfVersion = do
     checkTool name exe missingHint severity = do
       found <- ideFindExecutable env exe
       case found of
-        Nothing -> pure [Check (name <> ".path") severity (name <> " is not on PATH") missingHint]
+        Nothing ->
+          pure [Check (name <> ".path") severity (name <> " is not on PATH") missingHint]
         Just path -> do
           (code, out, err) <- run path ["--version"]
           let reported = parseVersionLine (Text.pack out)
-              located = Check (name <> ".path") CheckOk (name <> " found at " <> Text.pack path) Nothing
+              located =
+                Check (name <> ".path") CheckOk (name <> " found at " <> Text.pack path) Nothing
           pure $ case code of
             ExitFailure n ->
               [ located,
@@ -91,24 +109,52 @@ doctorChecks env selfVersion = do
     versionCheck name severity reported =
       case reported of
         Just version
-          | version == selfVersion -> Check (name <> ".version") CheckOk (name <> " " <> version <> " matches tynix " <> selfVersion) Nothing
+          | version == selfVersion ->
+              Check
+                (name <> ".version")
+                CheckOk
+                (name <> " " <> version <> " matches tynix " <> selfVersion)
+                Nothing
           | otherwise ->
               Check
                 (name <> ".version")
                 severity
                 (name <> " " <> version <> " does not match tynix " <> selfVersion)
-                (Just "upgrade both from the same release so the CLI and editors agree on diagnostics")
-        Nothing -> Check (name <> ".version") CheckWarn ("could not read the " <> name <> " version") Nothing
+                ( Just
+                    "upgrade both from the same release so the CLI and editors agree on diagnostics"
+                )
+        Nothing ->
+          Check
+            (name <> ".version")
+            CheckWarn
+            ("could not read the " <> name <> " version")
+            Nothing
     checkProject = do
       found <- findUp (ideCwd env)
       case found of
         Nothing ->
-          pure (Check "project.config" CheckWarn "no tynix.config.tynix in this directory or its parents" (Just "run `tynix init` to create one"))
+          pure
+            ( Check
+                "project.config"
+                CheckWarn
+                "no tynix.config.tynix in this directory or its parents"
+                (Just "run `tynix init` to create one")
+            )
         Just root -> do
           loaded <- loadProject (Just root)
           pure $ case loaded of
-            Left err -> Check "project.config" CheckFail ("tynix.config.tynix in " <> Text.pack root <> " is invalid") (Just (Text.pack err))
-            Right _ -> Check "project.config" CheckOk ("project config " <> Text.pack (root </> "tynix.config.tynix")) Nothing
+            Left err ->
+              Check
+                "project.config"
+                CheckFail
+                ("tynix.config.tynix in " <> Text.pack root <> " is invalid")
+                (Just (Text.pack err))
+            Right _ ->
+              Check
+                "project.config"
+                CheckOk
+                ("project config " <> Text.pack (root </> "tynix.config.tynix"))
+                Nothing
     findUp dir = do
       exists <- doesFileExist (dir </> "tynix.config.tynix")
       if exists
@@ -128,23 +174,57 @@ doctorChecks env selfVersion = do
                 hint = Just ("run `tynix ide install " <> name <> "`")
             pure . Just $ case status of
               Just True -> Check key CheckOk (name <> ": tynix is set up (" <> evidence <> ")") Nothing
-              Just False -> Check key CheckWarn (name <> ": detected (" <> evidence <> ") but tynix is not set up") hint
-              Nothing -> Check key CheckWarn (name <> ": detected (" <> evidence <> "); could not tell whether tynix is set up") hint
+              Just False ->
+                Check
+                  key
+                  CheckWarn
+                  (name <> ": detected (" <> evidence <> ") but tynix is not set up")
+                  hint
+              Nothing ->
+                Check
+                  key
+                  CheckWarn
+                  ( name
+                      <> ": detected ("
+                      <> evidence
+                      <> "); could not tell whether tynix is set up"
+                  )
+                  hint
       let found = catMaybes results
       pure $
         if null found
-          then [Check "editor" CheckSkip "no supported editor detected" (Just "see `tynix ide list`")]
+          then
+            [ Check
+                "editor"
+                CheckSkip
+                "no supported editor detected"
+                (Just "see `tynix ide list`")
+            ]
           else found
     checkNix = do
       found <- ideFindExecutable env "nix"
       case found of
-        Nothing -> pure (Check "nix" CheckWarn "nix is not on PATH" (Just "compiled .nix output needs Nix to evaluate; see https://nixos.org/download"))
+        Nothing ->
+          pure
+            ( Check
+                "nix"
+                CheckWarn
+                "nix is not on PATH"
+                ( Just
+                    "compiled .nix output needs Nix to evaluate; see https://nixos.org/download"
+                )
+            )
         Just path -> do
           (code, out, _) <- run path ["--version"]
           pure $
             if code == ExitSuccess
               then Check "nix" CheckOk (Text.strip (Text.pack out)) Nothing
-              else Check "nix" CheckWarn ("nix found at " <> Text.pack path <> " but `nix --version` failed") Nothing
+              else
+                Check
+                  "nix"
+                  CheckWarn
+                  ("nix found at " <> Text.pack path <> " but `nix --version` failed")
+                  Nothing
     nonEmpty t = if Text.null t then Nothing else Just t
 
 -- | Doctor succeeds unless some check failed outright.
@@ -159,7 +239,10 @@ renderDoctor color checks =
   where
     line check =
       [symbol (checkStatus check) <> " " <> checkMessage check]
-        <> [paint dim ("  " <> hint) | checkStatus check /= CheckOk, Just hint <- [checkHint check]]
+        <> [ paint dim ("  " <> hint)
+           | checkStatus check /= CheckOk,
+             Just hint <- [checkHint check]
+           ]
     symbol = \case
       CheckOk -> paint green "✓"
       CheckWarn -> paint yellow "!"
@@ -169,8 +252,15 @@ renderDoctor color checks =
     summary =
       if doctorSucceeded checks
         then paint green "tynix doctor: no problems found" <> warnings
-        else paint red ("tynix doctor: " <> Text.pack (show (count CheckFail)) <> " problem(s) found") <> warnings
-    warnings = if count CheckWarn > 0 then " (" <> Text.pack (show (count CheckWarn)) <> " warning(s))" else ""
+        else
+          paint
+            red
+            ("tynix doctor: " <> Text.pack (show (count CheckFail)) <> " problem(s) found")
+            <> warnings
+    warnings =
+      if count CheckWarn > 0
+        then " (" <> Text.pack (show (count CheckWarn)) <> " warning(s))"
+        else ""
     paint code text = if color then "\ESC[" <> code <> "m" <> text <> "\ESC[0m" else text
     green = "32"
     yellow = "33"

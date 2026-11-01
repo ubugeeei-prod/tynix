@@ -65,7 +65,12 @@ local function check_executables()
     if version then
       ok(string.format("%s: %s (%s)", server, version, vim.fn.exepath(server)))
     else
-      warn(string.format("%s is on PATH but `--version` failed: %s", server, err or "unknown error"))
+      local message = string.format(
+      "%s is on PATH but `--version` failed: %s",
+      server,
+      err or "unknown error"
+    )
+    warn(message)
     end
   else
     error(server .. " was not found on PATH", {
@@ -118,7 +123,13 @@ local function check_clients()
   local attached = {}
   for _, client in ipairs(get_clients()) do
     if client.name == "tynix" or client.name == "tynix-lsp" then
-      table.insert(attached, string.format("%s (id %d, root %s)", client.name, client.id, client.config.root_dir or "?"))
+      local description = string.format(
+        "%s (id %d, root %s)",
+        client.name,
+        client.id,
+        client.config.root_dir or "?"
+      )
+      table.insert(attached, description)
     end
   end
   if #attached > 0 then

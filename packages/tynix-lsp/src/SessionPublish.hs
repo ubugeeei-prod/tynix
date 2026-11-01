@@ -70,7 +70,8 @@ diagnosticValues :: FilePath -> Scan -> [DiagnosticInfo] -> [Value]
 diagnosticValues file scan = map encode
   where
     idx = scanLineIndex scan
-    pos off = let (l, c) = offsetToPosition idx off in object ["line" .= l, "character" .= c]
+    pos off =
+      let (l, c) = offsetToPosition idx off in object ["line" .= l, "character" .= c]
     rangeV (s, e) = object ["start" .= pos s, "end" .= pos e]
     encode d =
       object $
@@ -83,27 +84,28 @@ diagnosticValues file scan = map encode
             [ ("code" .=) <$> diagCode d,
               (\c -> "codeDescription" .= object ["href" .= codeHref c]) <$> diagCode d,
               if null (diagTags d) then Nothing else Just ("tags" .= diagTags d),
-              if null (diagRelated d)
-                then Nothing
-                else
-                  Just
-                    ( "relatedInformation"
-                        .= [ object
-                               [ "location" .= object ["uri" .= pathUri file, "range" .= rangeV r],
-                                 "message" .= m
-                               ]
-                           | (r, m) <- diagRelated d
-                           ]
-                    ),
+              relatedInformation d,
               ("data" .=) <$> diagData d
             ]
+
+    relatedInformation diagnostic
+      | null (diagRelated diagnostic) = Nothing
+      | otherwise =
+          Just ("relatedInformation" .= map relatedLocation (diagRelated diagnostic))
+    relatedLocation (range, message) =
+      object
+        [ "location" .= object ["uri" .= pathUri file, "range" .= rangeV range],
+          "message" .= message
+        ]
 
 -- | The @[Txxxxx]@ code embedded in a checker message.
 errorCode :: Text -> Maybe Text
 errorCode msg = do
   (_, rest) <- nonEmptyBreak (Text.breakOn "[T" msg)
   let candidate = Text.takeWhile (/= ']') (Text.drop 1 rest)
-  if Text.length candidate == 6 && Text.all isAlphaNum candidate then Just candidate else Nothing
+  if Text.length candidate == 6 && Text.all isAlphaNum candidate
+    then Just candidate
+    else Nothing
   where
     nonEmptyBreak (a, b) = if Text.null b then Nothing else Just (a, b)
 
@@ -121,7 +123,9 @@ stripErrorPrefixes msg =
             Text.stripStart (Text.intercalate ":" (drop locationParts segments))
         | otherwise = firstLine
       noCode = case Text.stripPrefix "[" noLoc of
-        Just rest | Text.length (Text.takeWhile (/= ']') rest) == 6 -> Text.stripStart (Text.drop 7 rest)
+        Just rest
+          | Text.length (Text.takeWhile (/= ']') rest) == 6 ->
+              Text.stripStart (Text.drop 7 rest)
         _ -> noLoc
    in noCode
 
@@ -134,7 +138,10 @@ dropExcerpt msg =
            in Text.intercalate "\n" (filter (not . Text.null) (codeOf header : body))
     _ -> msg
   where
-    isGutter l = "|" `Text.isPrefixOf` Text.stripStart (Text.dropWhile (`elem` ("0123456789" :: String)) (Text.stripStart l))
+    isGutter l =
+      "|"
+        `Text.isPrefixOf` Text.stripStart
+          (Text.dropWhile (`elem` ("0123456789" :: String)) (Text.stripStart l))
     -- keep a "[TP0004]"-style tag that lives on the header line
     codeOf header = case errorCode header of
       Just c -> "[" <> c <> "]"
@@ -144,7 +151,10 @@ dropExcerpt msg =
 -- quotes in a message.
 quotedName :: Text -> Maybe Text
 quotedName text =
-  case [(Text.length before, name) | q <- ["`", "\""], before : name : _ : _ <- [Text.splitOn q text]] of
+  case [ (Text.length before, name)
+       | q <- ["`", "\""],
+         before : name : _ : _ <- [Text.splitOn q text]
+       ] of
     [] -> Nothing
     found -> Just (snd (minimum found))
 
@@ -165,7 +175,9 @@ errorRange scan msg = narrowed <|> located <|> named
     code = fromMaybe "" (errorCode msg)
     located = do
       firstLine <- listToMaybe (Text.lines msg)
-      case mapMaybe readInt (takeWhile (isJust . readInt) (take 4 (Text.splitOn ":" firstLine))) of
+      case mapMaybe
+        readInt
+        (takeWhile (isJust . readInt) (take 4 (Text.splitOn ":" firstLine))) of
         [l, c, el, ec] -> do
           -- A full `line:col:endLine:endCol:` range from the checker.
           let start = positionToOffset idx (max 0 (l - 1), max 0 (c - 1))
@@ -188,17 +200,27 @@ errorRange scan msg = narrowed <|> located <|> named
           idents = [(i, t) | (i, t) <- toks, tokKind t == KIdent, tokText t == name]
           pick xs = span' . snd <$> listToMaybe xs
       case code of
-        "TC0001" -> pick [(i, t) | (i, t) <- idents, not (isReferenceToken scan i), not (isTypeToken scan i), textAt (i - 1) /= "."] <|> pick idents
+        "TC0001" ->
+          pick
+            [ (i, t)
+            | (i, t) <- idents,
+              not (isReferenceToken scan i),
+              not (isTypeToken scan i),
+              textAt (i - 1) /= "."
+            ]
+            <|> pick idents
         "TC0009" -> pick [(i, t) | (i, t) <- idents, textAt (i - 1) == "."] <|> pick idents
         c
-          | c `elem` ["TC0002", "TC0004", "TC0007"] -> pick (drop 1 idents) <|> pick idents
+          | c `elem` ["TC0002", "TC0004", "TC0007"] ->
+              pick (drop 1 idents) <|> pick idents
           | otherwise -> pick idents
 
 -- | Diagnostics for a failed (or successful) analysis.
 --
 -- @localized@ is an optional offset range found by re-checking with
 -- suppression directives when the message itself carries no location.
-analysisDiagnostics :: Ctx -> Either String Analysis -> Maybe (Int, Int) -> [DiagnosticInfo]
+analysisDiagnostics ::
+  Ctx -> Either String Analysis -> Maybe (Int, Int) -> [DiagnosticInfo]
 analysisDiagnostics _ (Right _) _ = []
 analysisDiagnostics ctx (Left err) localized =
   [ DiagnosticInfo
@@ -208,7 +230,10 @@ analysisDiagnostics ctx (Left err) localized =
         diagMessage = message <> suggestionText,
         diagTags = [],
         diagRelated = related,
-        diagData = if null suggestions then Nothing else Just (object ["suggestions" .= suggestions])
+        diagData =
+          if null suggestions
+            then Nothing
+            else Just (object ["suggestions" .= suggestions])
       }
   ]
   where
@@ -237,7 +262,9 @@ analysisDiagnostics ctx (Left err) localized =
       _ -> []
     selectionRelated = case code of
       Just "TC0009" ->
-        [ ((binderNameStart b, binderNameEnd b), "`" <> binderName b <> "` is declared here")
+        [ ( (binderNameStart b, binderNameEnd b),
+            "`" <> binderName b <> "` is declared here"
+          )
         | Just i <- [codeTokenIndexAt scan (fst range)],
           let path = selectionHead i,
           Just headName <- [listToMaybe path],
@@ -249,7 +276,8 @@ analysisDiagnostics ctx (Left err) localized =
           go k = if textAt (k - 1) == "." then go (k - 2) else k
        in [textAt (go i)]
     signatureRelated
-      | code `elem` map Just ["TC0013", "TC0014", "TC0015", "TC0019", "TC0020", "TC0021"] =
+      | code
+          `elem` map Just ["TC0013", "TC0014", "TC0015", "TC0019", "TC0020", "TC0021"] =
           [ (sig, "Expected type of `" <> binderName b <> "` is declared here")
           | b <- enclosingBindings scan (fst range),
             Just sig <- [binderSignature b]
@@ -310,7 +338,9 @@ nameDistance' a b = last (foldl step [0 .. length bs] (zip [1 ..] as))
     bs = map toLower (Text.unpack b)
     step prev (i, ca) =
       scanl
-        (\left (j, cb) -> minimum [left + 1, prev !! j + 1, prev !! (j - 1) + if ca == cb then 0 else 1])
+        ( \left (j, cb) ->
+            minimum [left + 1, prev !! j + 1, prev !! (j - 1) + if ca == cb then 0 else 1]
+        )
         i
         (zip [1 ..] bs)
 
@@ -413,7 +443,11 @@ lintDiagnostics env ctx = unused <> deprecated
         { diagRange = range,
           diagSeverity = 4,
           diagCode = Just "TL0002",
-          diagMessage = "`" <> name <> "` is deprecated" <> (if Text.null reason then "." else ": " <> reason),
+          diagMessage =
+            "`"
+              <> name
+              <> "` is deprecated"
+              <> (if Text.null reason then "." else ": " <> reason),
           diagTags = [2],
           diagRelated = [],
           diagData = Nothing
@@ -425,4 +459,8 @@ deprecationReason doc =
   case Text.breakOn "@deprecated" doc of
     (_, rest)
       | Text.null rest -> Nothing
-      | otherwise -> Just (Text.strip (Text.takeWhile (/= '\n') (Text.drop (Text.length "@deprecated") rest)))
+      | otherwise ->
+          Just
+            ( Text.strip
+                (Text.takeWhile (/= '\n') (Text.drop (Text.length "@deprecated") rest))
+            )

@@ -43,7 +43,15 @@ where
 import Alias (AliasEnv)
 import Check.Expression (patternBoundNames)
 import Control.Monad (when)
-import Control.Monad.State.Strict (StateT (..), evalStateT, get, gets, lift, modify', put)
+import Control.Monad.State.Strict
+  ( StateT (..),
+    evalStateT,
+    get,
+    gets,
+    lift,
+    modify',
+    put,
+  )
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
@@ -183,7 +191,8 @@ skolemize = \case
   TForall vars body -> do
     n <- freshMetaId
     let rigid var = TVar (var <> "'" <> T.pack (show n))
-    skolemize (substituteTypeVars (Map.fromList [(var, rigid var) | var <- vars]) body)
+    skolemize
+      (substituteTypeVars (Map.fromList [(var, rigid var) | var <- vars]) body)
   other -> pure other
 
 -- | Instantiate a result whose type is itself polymorphic (`Int -> forall a.
@@ -212,7 +221,9 @@ generalize env ty = do
       fresh prefix = freshTypeNames prefix taken
       typeMetas = filter (not . (`Set.member` effectsOnly)) quantifiable
       effectMetas = filter (`Set.member` effectsOnly) quantifiable
-      renaming = Map.fromList (zip typeMetas (TVar <$> fresh "t") <> zip effectMetas (TVar <$> fresh "e"))
+      renaming =
+        Map.fromList
+          (zip typeMetas (TVar <$> fresh "t") <> zip effectMetas (TVar <$> fresh "e"))
       names = take (length typeMetas) (fresh "t") <> take (length effectMetas) (fresh "e")
   pure (Scheme names (substituteMetas renaming zonked))
 
@@ -256,7 +267,10 @@ zonk ty = substituteMetas <$> gets substitutions <*> pure ty
 displayScheme :: Scheme -> InferM Scheme
 displayScheme (Scheme vars ty) = do
   zonked0 <- zonk ty
-  let zonked = substituteMetas (Map.fromSet (const pureEffects) (loneEffectMetas zonked0)) zonked0
+  let zonked =
+        substituteMetas
+          (Map.fromSet (const pureEffects) (loneEffectMetas zonked0))
+          zonked0
       metas = Set.toAscList (freeMetas zonked)
       taken = Set.fromList vars <> freeTypeVars zonked
       names = take (length metas) (freshTypeNames "t" taken)
@@ -331,7 +345,9 @@ boundMeta = \case
 bindMeta :: Int -> Type -> InferM Type
 bindMeta n ty = do
   resolved <- zonk ty
-  when (resolved == TMeta n || n `Set.member` freeMetas resolved) (throwCheck (withCode TC0016OccursCheckFailed "occurs check failed"))
+  when
+    (resolved == TMeta n || n `Set.member` freeMetas resolved)
+    (throwCheck (withCode TC0016OccursCheckFailed "occurs check failed"))
   replaceMetaSolution n resolved
   pure resolved
 
@@ -376,7 +392,9 @@ trackPattern pattern' action =
       put st{usages = Map.insert name (lambdaDepth st + 1, UZero) (usages st)}
       result <- action
       usage <- gets (maybe UZero snd . Map.lookup name . usages)
-      modify' (\st' -> st'{usages = maybe (Map.delete name) (Map.insert name) saved (usages st')})
+      modify'
+        ( \st' -> st'{usages = maybe (Map.delete name) (Map.insert name) saved (usages st')}
+        )
       pure (result, usage)
     _ -> (,UMany) <$> hideNames (patternBoundNames pattern') action
 
@@ -395,7 +413,8 @@ hideNames names action = do
 -- | Store a non-recursive solution after an occurs check or a literal join.
 replaceMetaSolution :: Int -> Type -> InferM ()
 replaceMetaSolution meta ty =
-  modify' (\state -> state{substitutions = Map.insert meta ty (substitutions state)})
+  modify'
+    (\state -> state{substitutions = Map.insert meta ty (substitutions state)})
 
 -- | Effects admitted by the current computation.
 ambientEffects :: InferM Type

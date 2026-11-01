@@ -14,30 +14,31 @@ use zed_extension_api::{
 /// variables, and respect any user override configured in Zed settings.
 struct Tynix;
 
+fn trimmed_nonempty(value: String) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 fn normalize_binary_path(path: Option<String>) -> Option<String> {
-    path.and_then(|value| {
-        let trimmed = value.trim().to_string();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    })
+    path.and_then(trimmed_nonempty)
 }
 
 fn normalize_binary_arguments(arguments: Option<Vec<String>>) -> Vec<String> {
     arguments
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|value| {
-            let trimmed = value.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
+        .filter_map(trimmed_nonempty)
         .collect()
+}
+
+fn configured_binary(settings: Option<LspSettings>) -> Option<(String, Vec<String>)> {
+    let binary = settings?.binary?;
+    let path = normalize_binary_path(binary.path)?;
+    Some((path, normalize_binary_arguments(binary.arguments)))
 }
 
 fn build_command(command: String, args: Vec<String>, env: Vec<(String, String)>) -> Command {
@@ -105,16 +106,9 @@ impl Extension for Tynix {
     ) -> Result<Command> {
         let env = worktree.shell_env();
 
-        if let Ok(settings) = LspSettings::for_worktree(language_server_id.as_ref(), worktree) {
-            if let Some(binary) = settings.binary {
-                if let Some(path) = normalize_binary_path(binary.path) {
-                    return Ok(build_command(
-                        path,
-                        normalize_binary_arguments(binary.arguments),
-                        env,
-                    ));
-                }
-            }
+        let configured = LspSettings::for_worktree(language_server_id.as_ref(), worktree).ok();
+        if let Some((path, arguments)) = configured_binary(configured) {
+            return Ok(build_command(path, arguments, env));
         }
 
         let path = worktree

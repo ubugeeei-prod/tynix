@@ -6,7 +6,13 @@ module Main (main) where
 import Alias (AliasEnv, mkAliasEnv)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
-import Subtyping (isConsistent, isSubtype, joinTypes, lookupRecordField, resolveType)
+import Subtyping
+  ( isConsistent,
+    isSubtype,
+    joinTypes,
+    lookupRecordField,
+    resolveType,
+  )
 import Test.Hspec
 import Test.QuickCheck
 import Type
@@ -54,8 +60,10 @@ spec = describe "subtyping and type reduction" $ do
     -- is never a subtype of anything it is not equal to. Gradual code reaches
     -- the same conclusion through consistency.
     isSubtype mempty tDynamic tDynamic `shouldBe` True
-    isSubtype mempty tDynamic (TUnion [tDynamic, TLit (LString "a")]) `shouldBe` False
-    isConsistent mempty tDynamic (TUnion [tDynamic, TLit (LString "a")]) `shouldBe` True
+    isSubtype mempty tDynamic (TUnion [tDynamic, TLit (LString "a")])
+      `shouldBe` False
+    isConsistent mempty tDynamic (TUnion [tDynamic, TLit (LString "a")])
+      `shouldBe` True
 
   it "treats literal values as subtypes of primitive constructors" $ do
     isSubtype mempty (TLit (LString "tynix")) tString `shouldBe` True
@@ -68,17 +76,23 @@ spec = describe "subtyping and type reduction" $ do
     isSubtype mempty (TLit (LBool False)) tBool `shouldBe` True
 
   it "supports structural width subtyping for records" $
-    isSubtype mempty (TRecord (Map.fromList [("a", tInt), ("b", tString)])) (TRecord (Map.fromList [("a", tInt)]))
+    isSubtype
+      mempty
+      (TRecord (Map.fromList [("a", tInt), ("b", tString)]))
+      (TRecord (Map.fromList [("a", tInt)]))
       `shouldBe` True
 
-  it "uses contravariant inputs, covariant outputs, and multiplicity subtyping for functions" $ do
-    let broad = TFun Many tString (TRecord (Map.fromList [("name", tString), ("value", tInt)]))
-        narrow = TFun Many (TLit (LString "x")) (TRecord (Map.fromList [("name", tString)]))
-        linear = TFun One tString tString
-        unrestricted = TFun Many tString tString
-    isSubtype mempty broad narrow `shouldBe` True
-    isSubtype mempty linear unrestricted `shouldBe` True
-    isSubtype mempty unrestricted linear `shouldBe` False
+  it
+    "uses contravariant inputs, covariant outputs, and multiplicity subtyping for functions"
+    $ do
+      let broad =
+            TFun Many tString (TRecord (Map.fromList [("name", tString), ("value", tInt)]))
+          narrow = TFun Many (TLit (LString "x")) (TRecord (Map.fromList [("name", tString)]))
+          linear = TFun One tString tString
+          unrestricted = TFun Many tString tString
+      isSubtype mempty broad narrow `shouldBe` True
+      isSubtype mempty linear unrestricted `shouldBe` True
+      isSubtype mempty unrestricted linear `shouldBe` False
 
   it "reduces generic aliases including HKT-shaped applications" $ do
     let env =
@@ -92,23 +106,31 @@ spec = describe "subtyping and type reduction" $ do
       `shouldBe` tList tString
 
   it "reduces nullary aliases without requiring synthetic arguments" $ do
-    let env = mkAliasEnv [plainAlias "Inputs" [] (TRecord (Map.fromList [("self", tDynamic)]))]
+    let env =
+          mkAliasEnv
+            [plainAlias "Inputs" [] (TRecord (Map.fromList [("self", tDynamic)]))]
     resolveType env (TCon "Inputs")
       `shouldBe` TRecord (Map.fromList [("self", tDynamic)])
 
   it "normalizes indexed containers to canonical tensor shapes" $ do
     resolveType mempty (TApp (TApp (TCon "Vec") (TLit (LInt 3))) tInt)
       `shouldBe` TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 3)])) tInt
-    resolveType mempty (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 4))) tString)
+    resolveType
+      mempty
+      (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 4))) tString)
       `shouldBe` TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 4)])) tString
 
   it "evaluates conditional types by pattern matching with infer" $ do
-    let elemOf = TConditional (tList tInt) (TApp (TCon "List") (TInfer "U")) (TVar "U") tDynamic
+    let elemOf =
+          TConditional (tList tInt) (TApp (TCon "List") (TInfer "U")) (TVar "U") tDynamic
     resolveType mempty elemOf `shouldBe` tInt
     let rowsOfMatrix =
           TConditional
             (TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 3))) tInt)
-            (TApp (TApp (TCon "Tensor") (TTypeList [TInfer "Rows", TInfer "Cols"])) (TInfer "Elem"))
+            ( TApp
+                (TApp (TCon "Tensor") (TTypeList [TInfer "Rows", TInfer "Cols"]))
+                (TInfer "Elem")
+            )
             (TVar "Rows")
             tDynamic
     resolveType mempty rowsOfMatrix `shouldBe` TLit (LInt 2)
@@ -128,17 +150,29 @@ spec = describe "subtyping and type reduction" $ do
         matrix22 = TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 2))) tInt
     isSubtype mempty vec2 (tList tInt) `shouldBe` True
     isSubtype mempty matrix22 (tList vec2) `shouldBe` True
-    joinTypes mempty vec2 vec3 `shouldBe` TApp (TApp (TCon "Vec") (TUnion [TLit (LInt 2), TLit (LInt 3)])) tInt
+    joinTypes mempty vec2 vec3
+      `shouldBe` TApp (TApp (TCon "Vec") (TUnion [TLit (LInt 2), TLit (LInt 3)])) tInt
 
   it "joins matrix shapes dimension-wise when ranks agree" $ do
     let matrix22 = TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 2))) tInt
         matrix32 = TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 3))) (TLit (LInt 2))) tInt
     joinTypes mempty matrix22 matrix32
-      `shouldBe` TApp (TApp (TApp (TCon "Matrix") (TUnion [TLit (LInt 2), TLit (LInt 3)])) (TLit (LInt 2))) tInt
+      `shouldBe` TApp
+        ( TApp
+            (TApp (TCon "Matrix") (TUnion [TLit (LInt 2), TLit (LInt 3)]))
+            (TLit (LInt 2))
+        )
+        tInt
 
   it "treats statically empty tensors as compatible with any element type" $ do
     let emptyVec = TApp (TApp (TCon "Vec") (TLit (LInt 0))) tDynamic
-        bounded = TApp (TApp (TCon "Vec") (TApp (TApp (TApp (TCon "Range") (TLit (LInt 0))) (TLit (LInt 2))) tNat)) tInt
+        bounded =
+          TApp
+            ( TApp
+                (TCon "Vec")
+                (TApp (TApp (TApp (TCon "Range") (TLit (LInt 0))) (TLit (LInt 2))) tNat)
+            )
+            tInt
     isSubtype mempty emptyVec bounded `shouldBe` True
 
   it "rejects nat subtyping when integer ranges cross below zero" $ do
@@ -150,8 +184,12 @@ spec = describe "subtyping and type reduction" $ do
   it "checks numeric refinements and unit wrappers structurally" $ do
     let smallNat = TApp (TApp (TApp (TCon "Range") (TLit (LInt 0))) (TLit (LInt 10))) tNat
         widerNat = TApp (TApp (TApp (TCon "Range") (TLit (LInt 0))) (TLit (LInt 20))) tNat
-        smallFloat = TApp (TApp (TApp (TCon "Range") (TLit (LFloat 0.0))) (TLit (LFloat 1.0))) tFloat
-        widerNumber = TApp (TApp (TApp (TCon "Range") (TLit (LFloat 0.0))) (TLit (LFloat 10.0))) tNumber
+        smallFloat =
+          TApp (TApp (TApp (TCon "Range") (TLit (LFloat 0.0))) (TLit (LFloat 1.0))) tFloat
+        widerNumber =
+          TApp
+            (TApp (TApp (TCon "Range") (TLit (LFloat 0.0))) (TLit (LFloat 10.0)))
+            tNumber
         timeout = TApp (TApp (TCon "Unit") (TLit (LString "ms"))) smallNat
         timeoutSeconds = TApp (TApp (TCon "Unit") (TLit (LString "s"))) smallNat
         widerTimeout = TApp (TApp (TCon "Unit") (TLit (LString "ms"))) tNumber
@@ -168,7 +206,10 @@ spec = describe "subtyping and type reduction" $ do
     isSubtype mempty (TLit (LInt 3)) timeout `shouldBe` True
     isSubtype mempty timeout widerTimeout `shouldBe` True
     isSubtype mempty timeout timeoutSeconds `shouldBe` False
-    joinTypes mempty timeout (TApp (TApp (TCon "Unit") (TLit (LString "ms"))) widerNat)
+    joinTypes
+      mempty
+      timeout
+      (TApp (TApp (TCon "Unit") (TLit (LString "ms"))) widerNat)
       `shouldBe` TApp (TApp (TCon "Unit") (TLit (LString "ms"))) widerNat
     joinTypes mempty timeout timeoutSeconds
       `shouldBe` TUnion [timeout, timeoutSeconds]
@@ -189,9 +230,23 @@ spec = describe "subtyping and type reduction" $ do
       `shouldBe` TApp (TCon "Tuple") (TTypeList [tInt, tString])
 
   it "joins shared fields across union members and rejects partial records" $ do
-    lookupRecordField mempty (TUnion [TRecord (Map.fromList [("value", TLit (LInt 1))]), TRecord (Map.fromList [("value", tString)])]) "value"
+    lookupRecordField
+      mempty
+      ( TUnion
+          [ TRecord (Map.fromList [("value", TLit (LInt 1))]),
+            TRecord (Map.fromList [("value", tString)])
+          ]
+      )
+      "value"
       `shouldBe` Just (TUnion [TLit (LInt 1), tString])
-    lookupRecordField mempty (TUnion [TRecord (Map.fromList [("value", tInt)]), TRecord (Map.fromList [("other", tString)])]) "value"
+    lookupRecordField
+      mempty
+      ( TUnion
+          [ TRecord (Map.fromList [("value", tInt)]),
+            TRecord (Map.fromList [("other", tString)])
+          ]
+      )
+      "value"
       `shouldBe` Nothing
 
   it "treats dynamic as consistent but not as a subtype of concrete types" $ do
@@ -210,7 +265,13 @@ spec = describe "subtyping and type reduction" $ do
 
   it "joins exact indexed lengths into bounded or union-like shapes" $ do
     let exact = TApp (TApp (TCon "Vec") (TLit (LInt 2))) tInt
-        bounded = TApp (TApp (TCon "Vec") (TApp (TApp (TApp (TCon "Range") (TLit (LInt 2))) (TLit (LInt 4))) tNat)) tInt
+        bounded =
+          TApp
+            ( TApp
+                (TCon "Vec")
+                (TApp (TApp (TApp (TCon "Range") (TLit (LInt 2))) (TLit (LInt 4))) tNat)
+            )
+            tInt
     joinTypes mempty exact bounded `shouldBe` bounded
 
   it "joins exact literals into exact unit-preserving vectors" $ do
@@ -243,14 +304,31 @@ genType size
 genLeafType :: Gen Type
 genLeafType =
   oneof
-    [ elements [tString, tInt, tFloat, tNumber, tNat, tBool, tNull, tPath, tAny, tDynamic, tUnknown],
+    [ elements
+        [ tString,
+          tInt,
+          tFloat,
+          tNumber,
+          tNat,
+          tBool,
+          tNull,
+          tPath,
+          tAny,
+          tDynamic,
+          tUnknown
+        ],
       TLit . LInt <$> chooseInteger (0, 1000),
       TLit . LBool <$> arbitrary,
       TLit . LString <$> genName
     ]
 
 genName :: Gen Name
-genName = Text.pack <$> ((:) <$> elements ['a' .. 'z'] <*> listOf (elements (['a' .. 'z'] <> ['0' .. '9'])))
+genName =
+  Text.pack
+    <$> ( (:)
+            <$> elements ['a' .. 'z']
+            <*> listOf (elements (['a' .. 'z'] <> ['0' .. '9']))
+        )
 
 shrinkType :: Type -> [Type]
 shrinkType = \case

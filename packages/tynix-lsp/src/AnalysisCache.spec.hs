@@ -43,7 +43,11 @@ spec = describe "AnalysisCache" $ do
     let capacity = analysisCacheCapacity
         overshoot = capacity + 10
         keys = [("/file" <> show n <> ".tynix", "stub") | n <- [1 .. overshoot]]
-        cache = foldl (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache (zip [1 :: Int ..] keys)
+        cache =
+          foldl
+            (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            (zip [1 :: Int ..] keys)
     analysisCacheSize cache `shouldBe` capacity
     -- The first 10 inserts should have been evicted.
     lookupAnalysisCache (head keys) cache `shouldBe` Nothing
@@ -53,7 +57,11 @@ spec = describe "AnalysisCache" $ do
   it "touches cached entries so eviction follows least-recently-used order" $ do
     let capacity = analysisCacheCapacity
         keys = [("/file" <> show n <> ".tynix", "stub") | n <- [1 .. capacity]]
-        fullCache = foldl (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache (zip [1 :: Int ..] keys)
+        fullCache =
+          foldl
+            (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            (zip [1 :: Int ..] keys)
         (hit, touchedCache) = accessAnalysisCache (head keys) fullCache
         evictedCache = insertAnalysisCache ("/extra.tynix", "stub") (Left "extra") touchedCache
     hit `shouldBe` Just (Left "1")
@@ -64,36 +72,55 @@ spec = describe "AnalysisCache" $ do
   it "evicts exactly one entry when an insert pushes it over" $ do
     let capacity = analysisCacheCapacity
         keys = [("/file" <> show n <> ".tynix", "stub") | n <- [1 .. capacity]]
-        full = foldl (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache (zip [1 :: Int ..] keys)
+        full =
+          foldl
+            (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            (zip [1 :: Int ..] keys)
         overflowed = insertAnalysisCache ("/extra.tynix", "stub") (Left "extra") full
     analysisCacheSize overflowed `shouldBe` capacity
     -- Only the least recently used key is gone; everything else survives.
     lookupAnalysisCache (head keys) overflowed `shouldBe` Nothing
     [lookupAnalysisCache key overflowed | key <- drop 1 keys]
       `shouldBe` [Just (Left (show n)) | n <- [2 .. capacity]]
-    lookupAnalysisCache ("/extra.tynix", "stub") overflowed `shouldBe` Just (Left "extra")
+    lookupAnalysisCache ("/extra.tynix", "stub") overflowed
+      `shouldBe` Just (Left "extra")
 
   it "does not grow when the same key is rewritten repeatedly" $ do
     let key = ("/tmp/main.tynix", "1")
-        cache = foldl (\acc n -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache [1 :: Int .. 1000]
+        cache =
+          foldl
+            (\acc n -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            [1 :: Int .. 1000]
     analysisCacheSize cache `shouldBe` 1
     lookupAnalysisCache key cache `shouldBe` Just (Left "1000")
 
   it "keeps every entry that fits, in any insertion order" $ do
     let keys = [("/file" <> show n <> ".tynix", "stub") | n <- [1 .. analysisCacheCapacity]]
-        cache = foldl (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache (zip [1 :: Int ..] (reverse keys))
+        cache =
+          foldl
+            (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            (zip [1 :: Int ..] (reverse keys))
     analysisCacheSize cache `shouldBe` analysisCacheCapacity
-    all (\key -> maybe False isLeft (lookupAnalysisCache key cache)) keys `shouldBe` True
+    all (\key -> maybe False isLeft (lookupAnalysisCache key cache)) keys
+      `shouldBe` True
 
   it "survives a burst far larger than its capacity" $ do
     let total = analysisCacheCapacity * 4
         keys = [("/file" <> show n <> ".tynix", "stub") | n <- [1 .. total]]
-        cache = foldl (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc) emptyAnalysisCache (zip [1 :: Int ..] keys)
+        cache =
+          foldl
+            (\acc (n, key) -> insertAnalysisCache key (Left (show n)) acc)
+            emptyAnalysisCache
+            (zip [1 :: Int ..] keys)
     analysisCacheSize cache `shouldBe` analysisCacheCapacity
     -- The surviving window is the most recent `capacity` inserts.
     lookupAnalysisCache (keys !! (total - analysisCacheCapacity)) cache
       `shouldBe` Just (Left (show (total - analysisCacheCapacity + 1)))
-    lookupAnalysisCache (keys !! (total - analysisCacheCapacity - 1)) cache `shouldBe` Nothing
+    lookupAnalysisCache (keys !! (total - analysisCacheCapacity - 1)) cache
+      `shouldBe` Nothing
 
   it "leaves the cache alone when a lookup misses" $ do
     let key = ("/tmp/main.tynix", "1")

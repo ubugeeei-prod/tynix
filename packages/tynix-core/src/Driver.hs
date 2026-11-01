@@ -61,8 +61,22 @@ import Kind
 import Parser
 import Pretty (renderExpr)
 import Syntax
-import System.Directory (doesDirectoryExist, doesFileExist, listDirectory, pathIsSymbolicLink)
-import System.FilePath (isAbsolute, joinPath, normalise, replaceExtension, splitDirectories, takeDirectory, takeFileName, (</>))
+import System.Directory
+  ( doesDirectoryExist,
+    doesFileExist,
+    listDirectory,
+    pathIsSymbolicLink,
+  )
+import System.FilePath
+  ( isAbsolute,
+    joinPath,
+    normalise,
+    replaceExtension,
+    splitDirectories,
+    takeDirectory,
+    takeFileName,
+    (</>),
+  )
 import Type
 
 -- | End-to-end analysis result for one file.
@@ -112,23 +126,36 @@ renderAnalysisErrorWithRange :: AnalysisError -> String
 renderAnalysisErrorWithRange err =
   case analysisErrorRange err of
     Just (line, column, endLine, endColumn) ->
-      show line <> ":" <> show column <> ":" <> show endLine <> ":" <> show endColumn <> ": " <> analysisErrorMessage err
+      show line
+        <> ":"
+        <> show column
+        <> ":"
+        <> show endLine
+        <> ":"
+        <> show endColumn
+        <> ": "
+        <> analysisErrorMessage err
     Nothing -> analysisErrorMessage err
 
 -- | 'analyzeText' with errors rendered by 'renderAnalysisErrorWithRange'.
 analyzeTextForEditor :: FilePath -> Text -> IO (Either String Analysis)
 analyzeTextForEditor path input = newSupportCache >>= \cache -> analyzeTextForEditorWith cache path input
 
-analyzeTextForEditorWith :: SupportCache -> FilePath -> Text -> IO (Either String Analysis)
+analyzeTextForEditorWith ::
+  SupportCache -> FilePath -> Text -> IO (Either String Analysis)
 analyzeTextForEditorWith cache path input =
-  either (Left . renderAnalysisErrorWithRange) Right <$> analyzeTextDetailedWith cache path input
+  either (Left . renderAnalysisErrorWithRange) Right
+    <$> analyzeTextDetailedWith cache path input
 
 -- | Convert a span of character offsets into a 1-based line/column range.
 -- Trailing whitespace absorbed by the lexer is trimmed from the end.
 spanToRange :: Text -> SrcSpan -> (Int, Int, Int, Int)
 spanToRange input (SrcSpan start end) =
   let clampedEnd = max start (min end (Text.length input))
-      trimmedEnd = start + Text.length (Text.stripEnd (Text.take (clampedEnd - start) (Text.drop start input)))
+      trimmedEnd =
+        start
+          + Text.length
+            (Text.stripEnd (Text.take (clampedEnd - start) (Text.drop start input)))
       (startLine, startColumn) = position start
       (endLine, endColumn) = position (max start trimmedEnd)
    in (startLine, startColumn, endLine, endColumn)
@@ -140,20 +167,40 @@ spanToRange input (SrcSpan start end) =
        in (lineNo, column)
 
 -- | 'analyzeText' reusing declaration support already loaded into @cache@.
-analyzeTextWith :: SupportCache -> FilePath -> Text -> IO (Either String Analysis)
-analyzeTextWith cache path input = either (Left . renderAnalysisError) Right <$> analyzeTextDetailedWith cache path input
+analyzeTextWith ::
+  SupportCache -> FilePath -> Text -> IO (Either String Analysis)
+analyzeTextWith cache path input =
+  either (Left . renderAnalysisError) Right
+    <$> analyzeTextDetailedWith cache path input
 
 -- | Analyze a buffer, keeping structured location information on failure.
-analyzeTextDetailedWith :: SupportCache -> FilePath -> Text -> IO (Either AnalysisError Analysis)
+analyzeTextDetailedWith ::
+  SupportCache -> FilePath -> Text -> IO (Either AnalysisError Analysis)
 analyzeTextDetailedWith cache path input = do
   support <- loadSupportWith cache path
   pure $ do
     supportWorld <- plain support
     located <- case parseProgramLocatedDetailed path input of
-      Left err -> Left (AnalysisError (Text.unpack (parseErrorMessage err)) (Just (parseErrorLine err, parseErrorColumn err, parseErrorLine err, parseErrorColumn err)))
+      Left err ->
+        Left
+          ( AnalysisError
+              (Text.unpack (parseErrorMessage err))
+              ( Just
+                  ( parseErrorLine err,
+                    parseErrorColumn err,
+                    parseErrorLine err,
+                    parseErrorColumn err
+                  )
+              )
+          )
       Right program -> Right program
     let program = stripProgramLocations located
-    _ <- plain (validateProgramKinds (programAliases program <> worldAliases supportWorld) program)
+    _ <-
+      plain
+        ( validateProgramKinds
+            (programAliases program <> worldAliases supportWorld)
+            program
+        )
     _ <- plain (validateProgramIndexedTypes program)
     localAmbient <- plain (collectAmbient path program)
     let aliases = mkAliasEnv (programAliases program <> worldAliases supportWorld)
@@ -169,27 +216,11 @@ analyzeTextDetailedWith cache path input = do
             }
     -- Each macro rule's template is checked once, here, rather than at every
     -- expansion.
-    forM_ (programMacros located) $ \macro ->
-      forM_ (zip [1 :: Int ..] (macroRules macro)) $ \(index, rule) ->
-        case checkProgramDetailed context (Program [] [] (Just (Marked Nothing (ruleCheck rule))) []) of
-          Right _ -> Right ()
-          Left err ->
-            Left
-              ( AnalysisError
-                  ( withCode
-                      TX0004InvalidTemplate
-                      ( "rule "
-                          <> show index
-                          <> " of macro `"
-                          <> Text.unpack (macroName macro)
-                          <> "` does not type-check: "
-                          <> checkErrorMessage err
-                      )
-                  )
-                  (Just (spanToRange input (macroSpan macro)))
-              )
+    checkMacroTemplates context input located
     result <- case checkProgramDetailed context located of
-      Left err -> Left (AnalysisError (checkErrorMessage err) (spanToRange input <$> checkErrorSpan err))
+      Left err ->
+        Left
+          (AnalysisError (checkErrorMessage err) (spanToRange input <$> checkErrorSpan err))
       Right ok -> Right ok
     pure
       Analysis
@@ -200,6 +231,35 @@ analyzeTextDetailedWith cache path input = do
           analysisAliases = aliases,
           analysisAmbient = ambient
         }
+
+-- | Check each macro template once, attributing failures to its definition.
+checkMacroTemplates ::
+  CheckContext -> Text -> Program -> Either AnalysisError ()
+checkMacroTemplates context input program =
+  forM_ (programMacros program) $ \macro ->
+    forM_ (zip [1 :: Int ..] (macroRules macro)) (checkRule macro)
+  where
+    checkRule macro (index, rule) =
+      case checkProgramDetailed
+        context
+        (Program [] [] (Just (Marked Nothing (ruleCheck rule))) []) of
+        Right _ -> Right ()
+        Left err ->
+          Left
+            ( AnalysisError
+                (templateMessage macro index err)
+                (Just (spanToRange input (macroSpan macro)))
+            )
+    templateMessage macro index err =
+      withCode
+        TX0004InvalidTemplate
+        ( "rule "
+            <> show index
+            <> " of macro `"
+            <> Text.unpack (macroName macro)
+            <> "` does not type-check: "
+            <> checkErrorMessage err
+        )
 
 plain :: Either String a -> Either AnalysisError a
 plain = either (\message -> Left (AnalysisError message Nothing)) Right
@@ -219,7 +279,9 @@ compileText path input = newSupportCache >>= \cache -> compileTextWith cache pat
 compileTextWith :: SupportCache -> FilePath -> Text -> IO (Either String Text)
 compileTextWith cache path input = do
   checked <- analyzeTextWith cache path input
-  pure $ checked >>= \analysis -> either (Left . Text.unpack) Right (compileProgram (analysisProgram analysis))
+  pure $
+    checked >>= \analysis ->
+      either (Left . Text.unpack) Right (compileProgram (analysisProgram analysis))
 
 -- | Compile a file from disk.
 compileFile :: FilePath -> IO (Either String Text)
@@ -245,7 +307,16 @@ emitText path input = do
   checked <- analyzeText path input
   pure $ do
     analysis <- checked
-    root <- maybe (Left (withCode TD0008DeclarationOnlyEmit "cannot emit declarations from a declaration-only file")) Right (analysisRoot analysis)
+    root <-
+      maybe
+        ( Left
+            ( withCode
+                TD0008DeclarationOnlyEmit
+                "cannot emit declarations from a declaration-only file"
+            )
+        )
+        Right
+        (analysisRoot analysis)
     pure (emitDeclarationFile path (analysisProgram analysis) root)
 
 emitTextTo :: FilePath -> FilePath -> Text -> IO (Either String Text)
@@ -253,33 +324,58 @@ emitTextTo source declarationPath input = do
   let runtimeTarget = replaceExtension source "nix"
   emitTextAs source runtimeTarget declarationPath input
 
-emitTextAs :: FilePath -> FilePath -> FilePath -> Text -> IO (Either String Text)
+emitTextAs ::
+  FilePath -> FilePath -> FilePath -> Text -> IO (Either String Text)
 emitTextAs source runtimeTarget declarationPath input =
   newSupportCache >>= \cache -> emitTextAsWith cache source runtimeTarget declarationPath input
 
-emitTextAsWith :: SupportCache -> FilePath -> FilePath -> FilePath -> Text -> IO (Either String Text)
+emitTextAsWith ::
+  SupportCache ->
+  FilePath ->
+  FilePath ->
+  FilePath ->
+  Text ->
+  IO (Either String Text)
 emitTextAsWith cache source runtimeTarget declarationPath input = do
   checked <- analyzeTextWith cache source input
   pure $ do
     analysis <- checked
-    root <- maybe (Left (withCode TD0008DeclarationOnlyEmit "cannot emit declarations from a declaration-only file")) Right (analysisRoot analysis)
-    pure (emitDeclarationFileFor runtimeTarget declarationPath (analysisProgram analysis) root)
+    root <-
+      maybe
+        ( Left
+            ( withCode
+                TD0008DeclarationOnlyEmit
+                "cannot emit declarations from a declaration-only file"
+            )
+        )
+        Right
+        (analysisRoot analysis)
+    pure
+      ( emitDeclarationFileFor
+          runtimeTarget
+          declarationPath
+          (analysisProgram analysis)
+          root
+      )
 
 -- | Emit a declaration file for a source file on disk.
 emitFile :: FilePath -> IO (Either String Text)
 emitFile path = readTextFile path >>= either (pure . Left) (emitText path)
 
 emitFileTo :: FilePath -> FilePath -> IO (Either String Text)
-emitFileTo source declarationPath = readTextFile source >>= either (pure . Left) (emitTextTo source declarationPath)
+emitFileTo source declarationPath =
+  readTextFile source >>= either (pure . Left) (emitTextTo source declarationPath)
 
 emitFileAs :: FilePath -> FilePath -> FilePath -> IO (Either String Text)
 emitFileAs source runtimeTarget declarationPath =
   newSupportCache >>= \cache -> emitFileAsWith cache source runtimeTarget declarationPath
 
 -- | 'emitFileAs' reusing declaration support already loaded into @cache@.
-emitFileAsWith :: SupportCache -> FilePath -> FilePath -> FilePath -> IO (Either String Text)
+emitFileAsWith ::
+  SupportCache -> FilePath -> FilePath -> FilePath -> IO (Either String Text)
 emitFileAsWith cache source runtimeTarget declarationPath =
-  readTextFile source >>= either (pure . Left) (emitTextAsWith cache source runtimeTarget declarationPath)
+  readTextFile source
+    >>= either (pure . Left) (emitTextAsWith cache source runtimeTarget declarationPath)
 
 -- | Look up a top-level symbol type exposed by an analysis result.
 --
@@ -288,7 +384,8 @@ emitFileAsWith cache source runtimeTarget declarationPath =
 lookupSymbolType :: Analysis -> Name -> Maybe Scheme
 lookupSymbolType analysis name =
   Map.lookup name (analysisBindings analysis)
-    <|> (analysisRoot analysis >>= \root -> if name == "default" then Just root else Nothing)
+    <|> ( analysisRoot analysis >>= \root -> if name == "default" then Just root else Nothing
+        )
 
 data World = World
   { worldAliases :: [TypeAlias],
@@ -372,7 +469,9 @@ loadSupportBundle root = do
   if not exists
     then pure (Right (SupportBundle [] []))
     else do
-      workspaceFiles <- map (\file -> DeclarationSupportFile file file) <$> findWorkspaceDeclarationFiles root
+      workspaceFiles <-
+        map (\file -> DeclarationSupportFile file file)
+          <$> findWorkspaceDeclarationFiles root
       configuredFilesResult <- loadConfiguredDeclarationFiles root
       case configuredFilesResult of
         Left err -> pure (Left err)
@@ -398,14 +497,16 @@ dedupeDeclarationFiles =
     . sort
     . map normalizeDeclarationSupportFile
 
-normalizeDeclarationSupportFile :: DeclarationSupportFile -> DeclarationSupportFile
+normalizeDeclarationSupportFile ::
+  DeclarationSupportFile -> DeclarationSupportFile
 normalizeDeclarationSupportFile file =
   file
     { declarationLoadPath = normalise (declarationLoadPath file),
       declarationResolvePath = normalise (declarationResolvePath file)
     }
 
-loadConfiguredDeclarationFiles :: FilePath -> IO (Either String [DeclarationSupportFile])
+loadConfiguredDeclarationFiles ::
+  FilePath -> IO (Either String [DeclarationSupportFile])
 loadConfiguredDeclarationFiles root = do
   let configPath = root </> "tynix.config.tynix"
   exists <- doesFileExist configPath
@@ -417,7 +518,14 @@ loadConfiguredDeclarationFiles root = do
         Left err -> pure (Left err)
         Right input ->
           case parseText configPath input of
-            Left err -> pure (Left (withCode TD0004ConfigDecodeError ("failed to parse " <> configPath <> ": " <> err)))
+            Left err ->
+              pure
+                ( Left
+                    ( withCode
+                        TD0004ConfigDecodeError
+                        ("failed to parse " <> configPath <> ": " <> err)
+                    )
+                )
             Right program ->
               case configuredDeclarationPackPaths configPath program of
                 Left err -> pure (Left err)
@@ -425,9 +533,19 @@ loadConfiguredDeclarationFiles root = do
                   expanded <- traverse (expandDeclarationPackPath root) packs
                   pure (fmap concat (sequence expanded))
 
-configuredDeclarationPackPaths :: FilePath -> Program -> Either String [FilePath]
+configuredDeclarationPackPaths ::
+  FilePath -> Program -> Either String [FilePath]
 configuredDeclarationPackPaths configPath program = do
-  expr <- maybe (Left (withCode TD0004ConfigDecodeError ("tynix.config.tynix must contain a root attribute set: " <> configPath))) (Right . markedValue) (programExpr program)
+  expr <-
+    maybe
+      ( Left
+          ( withCode
+              TD0004ConfigDecodeError
+              ("tynix.config.tynix must contain a root attribute set: " <> configPath)
+          )
+      )
+      (Right . markedValue)
+      (programExpr program)
   decodeDeclarationPackField (takeDirectory configPath) expr
 
 decodeDeclarationPackField :: FilePath -> Expr -> Either String [FilePath]
@@ -436,48 +554,88 @@ decodeDeclarationPackField root = \case
     case [expr | AttrField "declarationPacks" expr <- items] of
       [] -> Right []
       [expr] -> decodePathList root "declarationPacks" expr
-      _ -> Left (withCode TD0004ConfigDecodeError "duplicate config field: declarationPacks")
-  _ -> Left (withCode TD0004ConfigDecodeError "tynix.config.tynix must evaluate to an attrset")
+      _ ->
+        Left
+          (withCode TD0004ConfigDecodeError "duplicate config field: declarationPacks")
+  _ ->
+    Left
+      ( withCode
+          TD0004ConfigDecodeError
+          "tynix.config.tynix must evaluate to an attrset"
+      )
 
 decodePathList :: FilePath -> Text -> Expr -> Either String [FilePath]
 decodePathList root label = \case
   EList items -> traverse decodeItem items
-  other -> Left (withCode TD0005ConfigBadList ("expected list of path-like values for " <> Text.unpack label <> ", but got " <> Text.unpack (renderExpr other)))
+  other ->
+    Left
+      ( withCode
+          TD0005ConfigBadList
+          ( "expected list of path-like values for "
+              <> Text.unpack label
+              <> ", but got "
+              <> Text.unpack (renderExpr other)
+          )
+      )
   where
     decodeItem = \case
       EPath path -> Right (resolveConfigPath root path)
       EString text -> Right (resolveConfigPath root (Text.unpack (stringLiteralText text)))
-      item -> Left (withCode TD0006ConfigBadItem ("expected path-like item in " <> Text.unpack label <> ", but got " <> Text.unpack (renderExpr item)))
+      item ->
+        Left
+          ( withCode
+              TD0006ConfigBadItem
+              ( "expected path-like item in "
+                  <> Text.unpack label
+                  <> ", but got "
+                  <> Text.unpack (renderExpr item)
+              )
+          )
 
-expandDeclarationPackPath :: FilePath -> FilePath -> IO (Either String [DeclarationSupportFile])
+expandDeclarationPackPath ::
+  FilePath -> FilePath -> IO (Either String [DeclarationSupportFile])
 expandDeclarationPackPath root path = do
   let normalized = normalise path
   isDir <- doesDirectoryExist normalized
   fileExists <- doesFileExist normalized
-  if isDir
-    then do
+  case (isDir, fileExists) of
+    (True, _) -> do
       files <- findDeclarationFiles normalized
       pure (Right (map (mkDeclarationSupportFile root) files))
-    else
-      if fileExists
-        then
-          if ".d.tynix" `isSuffixOf` normalized
-            then pure (Right [mkDeclarationSupportFile root normalized])
-            else pure (Left (withCode TD0006ConfigBadItem ("declarationPacks entries must point to .d.tynix files or directories, but got " <> normalized)))
-        else pure (Left (withCode TD0006ConfigBadItem ("declarationPacks entry does not exist: " <> normalized)))
+    (False, True)
+      | ".d.tynix" `isSuffixOf` normalized ->
+          pure (Right [mkDeclarationSupportFile root normalized])
+      | otherwise ->
+          pure (Left (withCode TD0006ConfigBadItem (invalidEntry normalized)))
+    (False, False) ->
+      pure
+        ( Left
+            ( withCode
+                TD0006ConfigBadItem
+                ("declarationPacks entry does not exist: " <> normalized)
+            )
+        )
+  where
+    invalidEntry normalized =
+      "declarationPacks entries must point to .d.tynix files or directories, but got "
+        <> normalized
 
 mkDeclarationSupportFile :: FilePath -> FilePath -> DeclarationSupportFile
 mkDeclarationSupportFile root loadPath =
   DeclarationSupportFile
     { declarationLoadPath = loadPath,
-      declarationResolvePath = maybe (normalise loadPath) (normalise . (root </>) . joinPath) (workspacePackRelativeParts loadPath)
+      declarationResolvePath =
+        maybe
+          (normalise loadPath)
+          (normalise . (root </>) . joinPath)
+          (workspacePackRelativeParts loadPath)
     }
 
 workspacePackRelativeParts :: FilePath -> Maybe [FilePath]
 workspacePackRelativeParts path =
   findWorkspacePackSuffix (splitDirectories (normalise path))
   where
-    findWorkspacePackSuffix ("registry" : "workspace" : rest) = Just ("registry" : "workspace" : rest)
+    findWorkspacePackSuffix parts@("registry" : "workspace" : _) = Just parts
     findWorkspacePackSuffix (_ : rest) = findWorkspacePackSuffix rest
     findWorkspacePackSuffix [] = Nothing
 
@@ -494,7 +652,9 @@ dropDotSlash path =
 
 mergeLoadedWorlds :: [DeclarationSupportFile] -> [World] -> Either String World
 mergeLoadedWorlds files loaded = do
-  ambient <- mergeAmbientWorlds (zip (map declarationLoadPath files) (map worldAmbient loaded))
+  ambient <-
+    mergeAmbientWorlds
+      (zip (map declarationLoadPath files) (map worldAmbient loaded))
   pure World{worldAliases = concatMap worldAliases loaded, worldAmbient = ambient}
 
 loadDeclarationFile :: DeclarationSupportFile -> IO (Either String World)
@@ -503,9 +663,17 @@ loadDeclarationFile file = do
   inputResult <- readTextFile path
   pure $ do
     input <- inputResult
-    program <- firstError ("failed to load declaration file " <> path <> ": ") (parseText path input)
+    program <-
+      firstError
+        ("failed to load declaration file " <> path <> ": ")
+        (parseText path input)
     case markedValue <$> programExpr program of
-      Just _ -> Left (withCode TD0007DeclarationOnlyCompile ("declaration files must not contain executable expressions: " <> path))
+      Just _ ->
+        Left
+          ( withCode
+              TD0007DeclarationOnlyCompile
+              ("declaration files must not contain executable expressions: " <> path)
+          )
       Nothing -> do
         _ <- validateProgramKinds (programAliases program) program
         _ <- validateProgramIndexedTypes program
@@ -515,11 +683,19 @@ loadDeclarationFile file = do
 collectAmbient :: FilePath -> Program -> Either String (Map FilePath Scheme)
 collectAmbient file = collectAmbientWithBase file file
 
-collectAmbientWithBase :: FilePath -> FilePath -> Program -> Either String (Map FilePath Scheme)
+collectAmbientWithBase ::
+  FilePath -> FilePath -> Program -> Either String (Map FilePath Scheme)
 collectAmbientWithBase file resolveBase program = do
-  let duplicates = duplicateNames (map (resolvePath resolveBase . ambientPath) (programAmbient program))
+  let duplicates =
+        duplicateNames
+          (map (resolvePath resolveBase . ambientPath) (programAmbient program))
   case duplicates of
-    dup : _ -> Left (withCode TD0002DuplicateAmbientDeclaration ("duplicate ambient declarations for target `" <> dup <> "` in " <> file))
+    dup : _ ->
+      Left
+        ( withCode
+            TD0002DuplicateAmbientDeclaration
+            ("duplicate ambient declarations for target `" <> dup <> "` in " <> file)
+        )
     [] -> Map.fromList <$> traverse toPair (programAmbient program)
   where
     toPair decl = do
@@ -527,12 +703,24 @@ collectAmbientWithBase file resolveBase program = do
       pure (resolvePath resolveBase (ambientPath decl), scheme)
     schemeFromEntries entries =
       case duplicateNames (map ambientEntryName entries) of
-        dup : _ -> Left (withCode TD0003DuplicateAmbientEntry ("duplicate ambient entry `" <> Text.unpack dup <> "` in " <> file))
+        dup : _ ->
+          Left
+            ( withCode
+                TD0003DuplicateAmbientEntry
+                ("duplicate ambient entry `" <> Text.unpack dup <> "` in " <> file)
+            )
         [] ->
           Right $
             case entries of
               [AmbientEntry "default" ty] -> schemeFromAnnotation ty
-              _ -> Scheme [] (TRecord (Map.fromList [(ambientEntryName entry, ambientEntryType entry) | entry <- entries]))
+              _ ->
+                Scheme
+                  []
+                  ( TRecord
+                      ( Map.fromList
+                          [(ambientEntryName entry, ambientEntryType entry) | entry <- entries]
+                      )
+                  )
 
 findDeclarationFiles :: FilePath -> IO [FilePath]
 findDeclarationFiles dir = do
@@ -570,7 +758,8 @@ findWorkspaceDeclarationFiles root = do
               if depth <= 0 || isLink || ignoredDirectory name
                 then pure []
                 else do
-                  nestedWorkspace <- if normalise path == normalise root then pure False else hasWorkspaceMarker path
+                  nestedWorkspace <-
+                    if normalise path == normalise root then pure False else hasWorkspaceMarker path
                   if nestedWorkspace
                     then pure []
                     else go (depth - 1) path
@@ -615,7 +804,8 @@ hasWorkspaceMarker dir =
         doesDirectoryExist (dir </> ".git")
       ]
 
-mergeAmbientWorlds :: [(FilePath, Map FilePath Scheme)] -> Either String (Map FilePath Scheme)
+mergeAmbientWorlds ::
+  [(FilePath, Map FilePath Scheme)] -> Either String (Map FilePath Scheme)
 mergeAmbientWorlds = fmap snd . foldM step (Map.empty, Map.empty)
   where
     step (sources, ambient) (file, additions) =
@@ -656,5 +846,10 @@ readTextFile path = do
   result <- try @IOException (decodeUtf8Lenient <$> ByteString.readFile path)
   pure $
     case result of
-      Left err -> Left (withCode TD0001ReadFailed ("failed to read " <> path <> ": " <> displayException err))
+      Left err ->
+        Left
+          ( withCode
+              TD0001ReadFailed
+              ("failed to read " <> path <> ": " <> displayException err)
+          )
       Right input -> Right input

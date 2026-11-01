@@ -32,8 +32,28 @@ import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
 import Parser (parseProgram)
 import Syntax
-import System.Directory (canonicalizePath, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, makeAbsolute, removeFile, renameFile)
-import System.FilePath (addTrailingPathSeparator, isAbsolute, makeRelative, normalise, replaceExtension, takeBaseName, takeDirectory, takeFileName, (</>))
+import System.Directory
+  ( canonicalizePath,
+    createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    getCurrentDirectory,
+    listDirectory,
+    makeAbsolute,
+    removeFile,
+    renameFile,
+  )
+import System.FilePath
+  ( addTrailingPathSeparator,
+    isAbsolute,
+    makeRelative,
+    normalise,
+    replaceExtension,
+    takeBaseName,
+    takeDirectory,
+    takeFileName,
+    (</>),
+  )
 import System.IO (hClose, hFlush, openTempFile)
 
 data ProjectConfig = ProjectConfig
@@ -77,13 +97,16 @@ initProject target = do
       scaffoldResult <- scaffoldFromConfig config
       pure $
         fmap
-          (\summary -> Text.unlines ("created: " : ("- " <> Text.pack configPath) : Text.lines summary))
+          ( \summary ->
+              Text.unlines ("created: " : ("- " <> Text.pack configPath) : Text.lines summary)
+          )
           scaffoldResult
 
 scaffoldProject :: Maybe FilePath -> IO (Either String Text)
 scaffoldProject target = do
   root <- resolveRoot target
-  loadProjectConfig (root </> configFileName) >>= either (pure . Left) scaffoldFromConfig
+  loadProjectConfig (root </> configFileName)
+    >>= either (pure . Left) scaffoldFromConfig
 
 loadProject :: Maybe FilePath -> IO (Either String ProjectConfig)
 loadProject target = do
@@ -129,7 +152,9 @@ renderConfig config =
       "  declarationDir = " <> prettyPath (configDeclarationDir config) <> ";",
       "  declarationPacks = " <> prettyPathList (configDeclarationPacks config) <> ";",
       "  buildDir = " <> prettyPath (configBuildDir config) <> ";",
-      "  generatedDeclarationDir = " <> prettyPath (configGeneratedDeclarationDir config) <> ";",
+      "  generatedDeclarationDir = "
+        <> prettyPath (configGeneratedDeclarationDir config)
+        <> ";",
       "  entries = " <> prettyPathList (configEntries config) <> ";",
       "  include = " <> prettyPathList (configInclude config) <> ";",
       "  exclude = " <> prettyPathList (configExclude config) <> ";",
@@ -158,10 +183,16 @@ scaffoldFromConfig config = do
 
 plannedFiles :: ProjectConfig -> [PlannedFile]
 plannedFiles config =
-  [ PlannedFile (configRoot config </> "tynix.config.d.tynix") (renderConfigDeclarationFile config),
+  [ PlannedFile
+      (configRoot config </> "tynix.config.d.tynix")
+      (renderConfigDeclarationFile config),
     PlannedFile (configEntry config) (renderEntryFile config)
   ]
-    <> [PlannedFile (configDeclarationDir config </> "builtins.d.tynix") builtinsTemplate | configBuiltins config]
+    <> [ PlannedFile
+           (configDeclarationDir config </> "builtins.d.tynix")
+           builtinsTemplate
+       | configBuiltins config
+       ]
 
 materializeFile :: PlannedFile -> IO (Bool, FilePath)
 materializeFile planned = do
@@ -237,7 +268,8 @@ projectBuildOutputPath config source =
 
 projectDeclarationOutputPath :: ProjectConfig -> ProjectSource -> FilePath
 projectDeclarationOutputPath config source =
-  configGeneratedDeclarationDir config </> replaceExtension (projectSourceRelative source) "d.tynix"
+  configGeneratedDeclarationDir config
+    </> replaceExtension (projectSourceRelative source) "d.tynix"
 
 expandConfiguredPaths :: FilePath -> [FilePath] -> IO [FilePath]
 expandConfiguredPaths root =
@@ -271,26 +303,24 @@ walkTynixFilesWithLimit remaining visited root
   | remaining <= 0 = pure []
   | otherwise = do
       exists <- doesDirectoryExist root
-      if not exists
+      if exists then walkExisting else pure []
+  where
+    walkExisting = do
+      canonical <- canonicalizePathSafe root
+      if Set.member canonical visited
         then pure []
-        else do
-          canonical <- canonicalizePathSafe root
-          if Set.member canonical visited
-            then pure []
-            else do
-              names <- sort <$> listDirectory root
-              let visited' = Set.insert canonical visited
-                  next = remaining - 1
-              concat
-                <$> traverse
-                  ( \name -> do
-                      let path = root </> name
-                      isDir <- doesDirectoryExist path
-                      if isDir
-                        then walkTynixFilesWithLimit next visited' path
-                        else pure [path]
-                  )
-                  names
+        else walkChildren (Set.insert canonical visited)
+
+    walkChildren seen = do
+      names <- sort <$> listDirectory root
+      concat <$> traverse (visitChild seen) names
+
+    visitChild seen name = do
+      let path = root </> name
+      isDir <- doesDirectoryExist path
+      if isDir
+        then walkTynixFilesWithLimit (remaining - 1) seen path
+        else pure [path]
 
 canonicalizePathSafe :: FilePath -> IO FilePath
 canonicalizePathSafe path = do
@@ -306,22 +336,66 @@ loadProjectConfig configPath = do
       inputResult <- readTextFileSafe configPath
       pure $ do
         input <- inputResult
-        program <- firstTextError ("failed to parse " <> configPath <> ": ") (parseProgram configPath input)
-        expr <- maybe (Left "tynix.config.tynix must contain a root attribute set") (Right . markedValue) (programExpr program)
+        program <-
+          firstTextError
+            ("failed to parse " <> configPath <> ": ")
+            (parseProgram configPath input)
+        expr <-
+          maybe
+            (Left "tynix.config.tynix must contain a root attribute set")
+            (Right . markedValue)
+            (programExpr program)
         fields <- decodeAttrSet expr
         let root = takeDirectory configPath
             fallbackName = Text.pack (takeBaseName root)
         name <- maybe (Right fallbackName) decodeStringField (Map.lookup "name" fields)
-        sourceDir <- maybe (Right (root </> "src")) (decodePathField root "sourceDir") (Map.lookup "sourceDir" fields)
-        entry <- maybe (Right (sourceDir </> "main.tynix")) (decodePathField root "entry") (Map.lookup "entry" fields)
-        declarationDir <- maybe (Right (root </> "types")) (decodePathField root "declarationDir") (Map.lookup "declarationDir" fields)
-        declarationPacks <- maybe (Right []) (decodePathListField root "declarationPacks") (Map.lookup "declarationPacks" fields)
-        buildDir <- maybe (Right (root </> "dist")) (decodePathField root "buildDir") (Map.lookup "buildDir" fields)
-        generatedDeclarationDir <- maybe (Right (buildDir </> "types")) (decodePathField root "generatedDeclarationDir") (Map.lookup "generatedDeclarationDir" fields)
-        entries <- maybe (Right []) (decodePathListField root "entries") (Map.lookup "entries" fields)
-        include <- maybe (Right []) (decodePathListField root "include") (Map.lookup "include" fields)
-        exclude <- maybe (Right []) (decodePathListField root "exclude") (Map.lookup "exclude" fields)
-        builtins <- maybe (Right True) (decodeBoolField "builtins") (Map.lookup "builtins" fields)
+        sourceDir <-
+          maybe
+            (Right (root </> "src"))
+            (decodePathField root "sourceDir")
+            (Map.lookup "sourceDir" fields)
+        entry <-
+          maybe
+            (Right (sourceDir </> "main.tynix"))
+            (decodePathField root "entry")
+            (Map.lookup "entry" fields)
+        declarationDir <-
+          maybe
+            (Right (root </> "types"))
+            (decodePathField root "declarationDir")
+            (Map.lookup "declarationDir" fields)
+        declarationPacks <-
+          maybe
+            (Right [])
+            (decodePathListField root "declarationPacks")
+            (Map.lookup "declarationPacks" fields)
+        buildDir <-
+          maybe
+            (Right (root </> "dist"))
+            (decodePathField root "buildDir")
+            (Map.lookup "buildDir" fields)
+        generatedDeclarationDir <-
+          maybe
+            (Right (buildDir </> "types"))
+            (decodePathField root "generatedDeclarationDir")
+            (Map.lookup "generatedDeclarationDir" fields)
+        entries <-
+          maybe
+            (Right [])
+            (decodePathListField root "entries")
+            (Map.lookup "entries" fields)
+        include <-
+          maybe
+            (Right [])
+            (decodePathListField root "include")
+            (Map.lookup "include" fields)
+        exclude <-
+          maybe
+            (Right [])
+            (decodePathListField root "exclude")
+            (Map.lookup "exclude" fields)
+        builtins <-
+          maybe (Right True) (decodeBoolField "builtins") (Map.lookup "builtins" fields)
         pure
           ProjectConfig
             { configRoot = root,
@@ -351,7 +425,9 @@ decodeAttrSet = \case
                 AttrField name expr -> pure (name, expr)
                 AttrInherit _ -> Left "tynix.config.tynix does not support inherit in the root attrset"
                 AttrInheritFrom _ _ -> Left "tynix.config.tynix does not support inherit in the root attrset"
-                AttrPath _ _ -> Left "tynix.config.tynix does not support nested attribute paths in the root attrset"
+                AttrPath _ _ ->
+                  Left
+                    "tynix.config.tynix does not support nested attribute paths in the root attrset"
   _ -> Left "tynix.config.tynix must evaluate to an attrset"
 
 decodeStringField :: Expr -> Either String Text
@@ -362,23 +438,38 @@ decodeStringField = \case
 decodeBoolField :: Text -> Expr -> Either String Bool
 decodeBoolField name = \case
   EBool value -> Right value
-  other -> Left ("expected Bool for " <> Text.unpack name <> ", but got " <> show other)
+  other ->
+    Left ("expected Bool for " <> Text.unpack name <> ", but got " <> show other)
 
 decodePathField :: FilePath -> Text -> Expr -> Either String FilePath
 decodePathField root name = \case
   EPath path -> Right (resolveConfigPath root path)
   EString text -> Right (resolveConfigPath root (Text.unpack (stringLiteralText text)))
-  other -> Left ("expected path-like field for " <> Text.unpack name <> ", but got " <> show other)
+  other ->
+    Left
+      ( "expected path-like field for "
+          <> Text.unpack name
+          <> ", but got "
+          <> show other
+      )
 
 decodePathListField :: FilePath -> Text -> Expr -> Either String [FilePath]
 decodePathListField root name = \case
   EList items -> traverse decodeItem items
-  other -> Left ("expected list of path-like values for " <> Text.unpack name <> ", but got " <> show other)
+  other ->
+    Left
+      ( "expected list of path-like values for "
+          <> Text.unpack name
+          <> ", but got "
+          <> show other
+      )
   where
     decodeItem = \case
       EPath path -> Right (resolveConfigPath root path)
       EString text -> Right (resolveConfigPath root (Text.unpack (stringLiteralText text)))
-      item -> Left ("expected path-like item in " <> Text.unpack name <> ", but got " <> show item)
+      item ->
+        Left
+          ("expected path-like item in " <> Text.unpack name <> ", but got " <> show item)
 
 resolveConfigPath :: FilePath -> FilePath -> FilePath
 resolveConfigPath root path
@@ -399,13 +490,15 @@ isPathPrefixOf parent child =
   let normalizedParent = normalise parent
       normalizedChild = normalise child
    in normalizedParent == normalizedChild
-        || addTrailingPathSeparator normalizedParent `isPrefixOf` addTrailingPathSeparator normalizedChild
+        || addTrailingPathSeparator normalizedParent
+          `isPrefixOf` addTrailingPathSeparator normalizedChild
 
 matchesConfiguredPath :: FilePath -> FilePath -> Bool
 matchesConfiguredPath candidate configured =
   let normalizedCandidate = normalise candidate
       normalizedConfigured = normalise configured
-   in normalizedCandidate == normalizedConfigured || isPathPrefixOf normalizedConfigured normalizedCandidate
+   in normalizedCandidate == normalizedConfigured
+        || isPathPrefixOf normalizedConfigured normalizedCandidate
 
 quoted :: Text -> Text
 quoted text = "\"" <> Text.concatMap escapeDoubleQuoted text <> "\""

@@ -73,7 +73,10 @@ spec = do
     let env =
           mkAliasEnv
             [ plainAlias "Id" [] tInt,
-              plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")])),
+              plainAlias
+                "Pair"
+                ["a", "b"]
+                (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")])),
               plainAlias "Forever" [] (TCon "Forever")
             ]
 
@@ -109,7 +112,9 @@ spec = do
         expandAliases env (expandAliases env ty) === expandAliases env ty
 
     it "rewrites parameters inside nested records" $
-      expandAliases env (TRecord (Map.fromList [("value", TApp (TApp (TCon "Pair") tInt) tBool)]))
+      expandAliases
+        env
+        (TRecord (Map.fromList [("value", TApp (TApp (TCon "Pair") tInt) tBool)]))
         `shouldBe` TRecord
           ( Map.fromList
               [ ("value", TRecord (Map.fromList [("fst", tInt), ("snd", tBool)]))
@@ -122,7 +127,9 @@ spec = do
         `shouldBe` Just (Map.fromList [("a", tInt)])
 
     it "matches concrete patterns without binding when the shape is equal" $
-      matchPattern (TRecord (Map.fromList [("value", tInt)])) (TRecord (Map.fromList [("value", tInt)]))
+      matchPattern
+        (TRecord (Map.fromList [("value", tInt)]))
+        (TRecord (Map.fromList [("value", tInt)]))
         `shouldBe` Just Map.empty
 
     it "captures inner positions through structural patterns" $
@@ -132,7 +139,9 @@ spec = do
         `shouldBe` Just (Map.fromList [("argument", tInt), ("result", tString)])
 
     it "rejects record patterns whose required fields are missing in the actual" $
-      matchPattern (TRecord (Map.fromList [("foo", tInt)])) (TRecord (Map.fromList [("bar", TInfer "x")]))
+      matchPattern
+        (TRecord (Map.fromList [("foo", tInt)]))
+        (TRecord (Map.fromList [("bar", TInfer "x")]))
         `shouldBe` Nothing
 
     it "rejects type-list patterns with a different arity" $
@@ -178,7 +187,8 @@ genUnionMember size
         ]
 
 genPoolType :: Gen Type
-genPoolType = elements [tInt, tString, tBool, tNull, tNat, TLit (LInt 1), TLit (LString "x")]
+genPoolType =
+  elements [tInt, tString, tBool, tNull, tNat, TLit (LInt 1), TLit (LString "x")]
 
 -- | An alias environment paired with a type that mentions it.
 data AliasCase = AliasCase AliasEnv Type
@@ -200,7 +210,10 @@ aliasEnvironments =
     mkAliasEnv [plainAlias "Leaf" [] tInt],
     mkAliasEnv
       [ plainAlias "Box" ["a"] (TRecord (Map.fromList [("value", TVar "a")])),
-        plainAlias "Pair" ["a", "b"] (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))
+        plainAlias
+          "Pair"
+          ["a", "b"]
+          (TRecord (Map.fromList [("fst", TVar "a"), ("snd", TVar "b")]))
       ],
     mkAliasEnv
       [ plainAlias "A" [] (TCon "B"),
@@ -234,7 +247,9 @@ genAliasedLeaf :: Gen Type
 genAliasedLeaf =
   oneof
     [ elements [tInt, tString, tBool, tDynamic],
-      TCon <$> elements ["Leaf", "Box", "Pair", "A", "B", "C", "Apply", "Loop", "Grow", "Unknown"],
+      TCon
+        <$> elements
+          ["Leaf", "Box", "Pair", "A", "B", "C", "Apply", "Loop", "Grow", "Unknown"],
       TVar <$> genAliasName
     ]
 

@@ -112,7 +112,11 @@ expandAliases env = goPath Set.empty 0
           reduce = reduceWith seen
        in case ty of
             TTypeList items -> TTypeList (map (go depth) items)
-            TArrow arrow a b -> TArrow arrow{arrowEffects = go depth (arrowEffects arrow)} (go depth a) (go depth b)
+            TArrow arrow a b ->
+              TArrow
+                arrow{arrowEffects = go depth (arrowEffects arrow)}
+                (go depth a)
+                (go depth b)
             TRecord fields -> TRecord (fmap (go depth) fields)
             TOpenRecord fields tail' -> mkOpenRecord (fmap (go depth) fields) (go depth tail')
             TOptional inner -> TOptional (go depth inner)
@@ -160,7 +164,9 @@ expandAliasHead env = go 0
                 length args >= length (typeAliasParams alias) ->
                   let (used, rest) = splitAt (length (typeAliasParams alias)) args
                       subst = Map.fromList (zip (typeAliasParams alias) used)
-                   in go (depth + 1) (foldl TApp (substituteTypeVars subst (typeAliasBody alias)) rest)
+                   in go
+                        (depth + 1)
+                        (foldl TApp (substituteTypeVars subst (typeAliasBody alias)) rest)
             _ -> ty
 
 -- | Whether a type is headed by an `opaque type` (fully applied or not).
@@ -180,7 +186,11 @@ revealOpaque env ty =
       | Just alias <- Map.lookup name env,
         typeAliasOpaque alias,
         length args == length (typeAliasParams alias) ->
-          Just (substituteTypeVars (Map.fromList (zip (typeAliasParams alias) args)) (typeAliasBody alias))
+          Just
+            ( substituteTypeVars
+                (Map.fromList (zip (typeAliasParams alias) args))
+                (typeAliasBody alias)
+            )
     _ -> Nothing
 
 -- | Match a concrete type against a pattern containing 'TInfer' placeholders.
@@ -207,7 +217,8 @@ matchPattern = go Map.empty
     go env (TTypeList actualItems) (TTypeList patternItems)
       | length actualItems == length patternItems =
           foldl
-            (\acc (actualTy, nextPatternTy) -> acc >>= \env' -> go env' actualTy nextPatternTy)
+            ( \acc (actualTy, nextPatternTy) -> acc >>= \env' -> go env' actualTy nextPatternTy
+            )
             (Just env)
             (zip actualItems patternItems)
       | otherwise = Nothing

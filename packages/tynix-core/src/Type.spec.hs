@@ -48,7 +48,10 @@ spec = do
 
     it "removes the substituted names from the free variables" $
       property $ \(AnyType ty) ->
-        let substituted = substituteTypeVars (Map.fromList [(name, tInt) | name <- Set.toList (freeTypeVars ty)]) ty
+        let substituted =
+              substituteTypeVars
+                (Map.fromList [(name, tInt) | name <- Set.toList (freeTypeVars ty)])
+                ty
          in freeTypeVars substituted === Set.empty
 
   describe "substituteMetas" $ do
@@ -186,7 +189,19 @@ genType size
 genLeaf :: Gen Type
 genLeaf =
   oneof
-    [ elements [tString, tInt, tFloat, tNumber, tNat, tBool, tNull, tPath, tAny, tDynamic, tUnknown],
+    [ elements
+        [ tString,
+          tInt,
+          tFloat,
+          tNumber,
+          tNat,
+          tBool,
+          tNull,
+          tPath,
+          tAny,
+          tDynamic,
+          tUnknown
+        ],
       TVar <$> genName,
       TCon <$> genName,
       TMeta <$> chooseInt (0, 8),
@@ -198,7 +213,8 @@ genLeaf =
     ]
 
 genName :: Gen Name
-genName = Text.pack <$> ((:) <$> elements ['a' .. 'f'] <*> listOf (elements ['0' .. '3']))
+genName =
+  Text.pack <$> ((:) <$> elements ['a' .. 'f'] <*> listOf (elements ['0' .. '3']))
 
 shrinkType :: Type -> [Type]
 shrinkType = \case

@@ -3,11 +3,25 @@ local M = {}
 local uv = vim.uv or vim.loop
 
 local default_cmd = { "tynix-lsp" }
-local default_root_markers = { "flake.nix", "cabal.project", "pnpm-workspace.yaml", "tynix.config.tynix", ".git" }
+local default_root_markers = {
+  "flake.nix",
+  "cabal.project",
+  "pnpm-workspace.yaml",
+  "tynix.config.tynix",
+  ".git",
+}
 local default_filetypes = { "tynix", "nix" }
 
 local function clone(list)
   return vim.deepcopy(list)
+end
+
+local function normalize_string(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  local trimmed = vim.trim(value)
+  return trimmed ~= "" and trimmed or nil
 end
 
 local function normalize_list(values)
@@ -18,11 +32,9 @@ local function normalize_list(values)
   end
 
   for _, value in ipairs(values) do
-    if type(value) == "string" then
-      local trimmed = vim.trim(value)
-      if trimmed ~= "" then
-        table.insert(normalized, trimmed)
-      end
+    local trimmed = normalize_string(value)
+    if trimmed then
+      table.insert(normalized, trimmed)
     end
   end
 
@@ -36,11 +48,9 @@ end
 ---@param cmd string|string[]|nil
 ---@return string[]
 function M.normalize_cmd(cmd)
-  if type(cmd) == "string" then
-    local trimmed = vim.trim(cmd)
-    if trimmed ~= "" then
-      return { trimmed }
-    end
+  local command = normalize_string(cmd)
+  if command then
+    return { command }
   end
 
   local normalized = normalize_list(cmd)

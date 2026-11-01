@@ -44,12 +44,16 @@ prettyAmbient :: AmbientDecl -> Doc ann
 prettyAmbient decl =
   prettyDecl
     (ambientPath decl)
-    [(ambientEntryName entry, ambientEntryType entry) | entry <- ambientEntries decl]
+    [ (ambientEntryName entry, ambientEntryType entry) | entry <- ambientEntries decl
+    ]
 
 -- | Render an executable program back to plain Nix code.
 renderProgramAsNix :: Program -> Either Text Text
 renderProgramAsNix program =
-  maybe (Left "declaration-only files cannot be compiled to .nix") (Right . render . prettyExpr 0 . markedValue) (programExpr program)
+  maybe
+    (Left "declaration-only files cannot be compiled to .nix")
+    (Right . render . prettyExpr 0 . markedValue)
+    (programExpr program)
 
 -- | Render a declaration file for a target path and exported entries.
 renderDeclarationFile :: FilePath -> [TypeAlias] -> [(Name, Type)] -> Text
@@ -82,7 +86,12 @@ prettyAlias :: TypeAlias -> Doc ann
 prettyAlias alias =
   (if typeAliasOpaque alias then "opaque type" else "type")
     <+> pretty (typeAliasName alias)
-    <+> hsep (zipWith prettyParam (typeAliasParams alias) (typeAliasParamKinds alias <> repeat Nothing))
+    <+> hsep
+      ( zipWith
+          prettyParam
+          (typeAliasParams alias)
+          (typeAliasParamKinds alias <> repeat Nothing)
+      )
     <+> "="
     <+> prettyType 0 (typeAliasBody alias)
     <> ";"
@@ -96,7 +105,12 @@ prettyDecl :: FilePath -> [(Name, Type)] -> Doc ann
 prettyDecl path entries =
   vsep
     [ "declare" <+> prettyQuoted (Text.pack path) <+> "{",
-      indent 2 (vsep [prettyAttrName name <+> "::" <+> prettyType 0 ty <> ";" | (name, ty) <- entries]),
+      indent
+        2
+        ( vsep
+            [ prettyAttrName name <+> "::" <+> prettyType 0 ty <> ";" | (name, ty) <- entries
+            ]
+        ),
       "};"
     ]
 
@@ -126,9 +140,23 @@ prettyExpr p = \case
   -- Control-flow forms extend to the right, so they must be parenthesized
   -- whenever they appear in any tighter position (p > 0).
   ELambda pattern' body -> parenIf (p > 0) (prettyPattern pattern' <> ":" <+> prettyExpr 0 body)
-  EIf a b c -> parenIf (p > 0) (vsep ["if" <+> prettyExpr 0 a, "then" <+> prettyExpr 0 b, "else" <+> prettyExpr 0 c])
-  ELet items body -> parenIf (p > 0) (vsep ["let", indent 2 (vsep (map (prettyLet . markedValue) items)), "in" <+> prettyExpr 0 body])
-  EAssert cond body -> parenIf (p > 0) ("assert" <+> prettyExpr 0 cond <> ";" <+> prettyExpr 0 body)
+  EIf a b c ->
+    parenIf
+      (p > 0)
+      ( vsep
+          ["if" <+> prettyExpr 0 a, "then" <+> prettyExpr 0 b, "else" <+> prettyExpr 0 c]
+      )
+  ELet items body ->
+    parenIf
+      (p > 0)
+      ( vsep
+          [ "let",
+            indent 2 (vsep (map (prettyLet . markedValue) items)),
+            "in" <+> prettyExpr 0 body
+          ]
+      )
+  EAssert cond body ->
+    parenIf (p > 0) ("assert" <+> prettyExpr 0 cond <> ";" <+> prettyExpr 0 body)
   EWith scope body -> parenIf (p > 0) ("with" <+> prettyExpr 0 scope <> ";" <+> prettyExpr 0 body)
   -- Operators: each level parenthesizes only when the surrounding context binds
   -- tighter than the operator, and the non-associative operand side is bumped by
@@ -139,7 +167,9 @@ prettyExpr p = \case
           | binOpNonAssoc op = (q + 1, q + 1)
           | binOpRightAssoc op = (q + 1, q)
           | otherwise = (q, q + 1)
-     in parenIf (p > q) (prettyExpr leftP left <+> pretty (binOpSymbol op) <+> prettyExpr rightP right)
+     in parenIf
+          (p > q)
+          (prettyExpr leftP left <+> pretty (binOpSymbol op) <+> prettyExpr rightP right)
   EUnaryOp OpNot operand -> parenIf (p > 8) ("!" <> prettyExpr 8 operand)
   EUnaryOp OpNeg operand -> parenIf (p > 13) ("-" <> prettyExpr 14 operand)
   EHasAttr base path -> parenIf (p > 12) (prettyExpr 13 base <+> "?" <+> prettyAttrPath path)
@@ -147,7 +177,14 @@ prettyExpr p = \case
   EAscribe expr ty -> parens (prettyExpr 0 expr <+> "::" <+> prettyType 0 ty)
   EApp f x -> parenIf (p > 15) (prettyExpr 15 f <+> prettyExpr 16 x)
   ESelect base steps -> parenIf (p > 16) (prettyExpr 16 base <> foldMap prettySelectStep steps)
-  ESelectOr base steps fallback -> parenIf (p > 15) (prettyExpr 16 base <> foldMap prettySelectStep steps <+> "or" <+> prettyExpr 16 fallback)
+  ESelectOr base steps fallback ->
+    parenIf
+      (p > 15)
+      ( prettyExpr 16 base
+          <> foldMap prettySelectStep steps
+          <+> "or"
+          <+> prettyExpr 16 fallback
+      )
   -- Self-delimiting atoms never need outer parentheses; list/application
   -- operands are rendered tightly so nested calls and operators stay grouped.
   EAttrSet items -> vsep ["{", indent 2 (vsep (map prettyAttr items)), "}"]
@@ -170,7 +207,12 @@ prettyLet = \case
 
 prettyInherit :: Maybe Expr -> [Name] -> Doc ann
 prettyInherit source names =
-  hsep (["inherit"] <> maybe [] (\expr -> [parens (prettyExpr 0 expr)]) source <> map prettyAttrName names) <> ";"
+  hsep
+    ( ["inherit"]
+        <> maybe [] (\expr -> [parens (prettyExpr 0 expr)]) source
+        <> map prettyAttrName names
+    )
+    <> ";"
 
 prettyAttrPath :: [SelectStep] -> Doc ann
 prettyAttrPath steps = hcat (punctuate "." (map prettyKey steps))
@@ -216,7 +258,10 @@ prettyAttr = \case
 
 prettyAttrName :: Name -> Doc ann
 prettyAttrName name
-  | isBareAttrName name && name `notElem` ["inherit", "rec", "let", "in", "if", "then", "else", "assert", "with", "or"] = pretty name
+  | isBareAttrName name
+      && name
+        `notElem` ["inherit", "rec", "let", "in", "if", "then", "else", "assert", "with", "or"] =
+      pretty name
   | otherwise = prettyQuoted name
 
 prettyStringLiteral :: StringLiteral -> Doc ann
@@ -234,7 +279,11 @@ prettyInterp form parts =
       bordersQuotes index = index == lastIndex || isEscape (drop (index + 1) parts)
       isEscape (StrEscape _ : _) = True
       isEscape _ = False
-      body = hcat [prettyStringPart form (index == 0) (bordersQuotes index) part | (index, part) <- zip [0 ..] parts]
+      body =
+        hcat
+          [ prettyStringPart form (index == 0) (bordersQuotes index) part
+          | (index, part) <- zip [0 ..] parts
+          ]
    in case form of
         InterpDouble -> dquotes body
         InterpIndented -> "''" <> body <> "''"
@@ -254,8 +303,11 @@ prettyStringPart form atStart atEnd = \case
             then (Text.dropEnd 1 text, True)
             else (text, False)
      in case form of
-          InterpDouble -> pretty (escapeDoubleQuoted body) <> (if trailingDollar then "\\$" else mempty)
-          InterpIndented -> verbatim (escapeIndented atStart (atEnd || trailingDollar) body) <> (if trailingDollar then "''$" else mempty)
+          InterpDouble ->
+            pretty (escapeDoubleQuoted body) <> (if trailingDollar then "\\$" else mempty)
+          InterpIndented ->
+            verbatim (escapeIndented atStart (atEnd || trailingDollar) body)
+              <> (if trailingDollar then "''$" else mempty)
   StrExpr expr -> "${" <> prettyExpr 0 expr <> "}"
   StrEscape c ->
     case form of
@@ -277,8 +329,14 @@ prettyType p ty =
         Just (dims, elemTy) ->
           case dims of
             [lenTy] -> parenIf (p > 2) ("Vec" <+> prettyType 3 lenTy <+> prettyType 3 elemTy)
-            [rowsTy, colsTy] -> parenIf (p > 2) ("Matrix" <+> prettyType 3 rowsTy <+> prettyType 3 colsTy <+> prettyType 3 elemTy)
-            _ -> parenIf (p > 2) ("Tensor" <+> prettyType 3 (TTypeList dims) <+> prettyType 3 elemTy)
+            [rowsTy, colsTy] ->
+              parenIf
+                (p > 2)
+                ("Matrix" <+> prettyType 3 rowsTy <+> prettyType 3 colsTy <+> prettyType 3 elemTy)
+            _ ->
+              parenIf
+                (p > 2)
+                ("Tensor" <+> prettyType 3 (TTypeList dims) <+> prettyType 3 elemTy)
         Nothing ->
           case ty of
             TVar name -> pretty name
@@ -298,7 +356,13 @@ prettyType p ty =
                     case arrowMult arrow of
                       One -> "%1 "
                       Many -> mempty
-                  captures = maybe mempty (\names -> if null names then mempty else braces (hsep (punctuate "," (pretty <$> names)))) (arrowCaptures arrow)
+                  captures =
+                    maybe
+                      mempty
+                      ( \names ->
+                          if null names then mempty else braces (hsep (punctuate "," (pretty <$> names)))
+                      )
+                      (arrowCaptures arrow)
                   domain =
                     case arrowBinder arrow of
                       Just name -> parens (pretty name <+> "::" <+> prettyType 0 a)
@@ -308,14 +372,35 @@ prettyType p ty =
                     case (effects, b) of
                       (Just _, TArrow{}) -> parens (prettyType 0 b)
                       _ -> prettyType 0 b
-               in parenIf (p > 0) (domain <+> mult <> "->" <> captures <+> codomain <> maybe mempty (" !" <+>) effects)
+               in parenIf
+                    (p > 0)
+                    ( domain
+                        <+> mult
+                        <> "->"
+                        <> captures
+                        <+> codomain
+                        <> maybe mempty (" !" <+>) effects
+                    )
             TRecord fields -> prettyRecordType fields Nothing
             TOpenRecord fields tail' -> prettyRecordType fields (Just tail')
             TOptional inner -> prettyType p inner
             TUnion members -> parenIf (p > 1) (hsep (punctuate " |" (map (prettyType 2) members)))
             TApp f x -> parenIf (p > 2) (prettyType 2 f <+> prettyType 3 x)
-            TForall vars body -> parenIf (p > 0) ("forall" <+> hsep (pretty <$> vars) <> "." <+> prettyType 0 body)
-            TConditional a b c d -> parenIf (p > 0) (prettyType 2 a <+> "extends" <+> prettyType 2 b <+> "?" <+> prettyType 0 c <+> ":" <+> prettyType 0 d)
+            TForall vars body ->
+              parenIf
+                (p > 0)
+                ("forall" <+> hsep (pretty <$> vars) <> "." <+> prettyType 0 body)
+            TConditional a b c d ->
+              parenIf
+                (p > 0)
+                ( prettyType 2 a
+                    <+> "extends"
+                    <+> prettyType 2 b
+                    <+> "?"
+                    <+> prettyType 0 c
+                    <+> ":"
+                    <+> prettyType 0 d
+                )
             TInfer name -> "infer" <+> pretty name
             TSingleton name _ -> pretty name
 
@@ -347,7 +432,8 @@ prettyEffects = \case
 -- row ends in `...` (or `...r` when the row is a named variable).
 prettyRecordType :: Map.Map Name Type -> Maybe Type -> Doc ann
 prettyRecordType fields rowTail =
-  vsep ["{", indent 2 (vsep (map prettyField (Map.toList fields) <> rowLine)), "}"]
+  vsep
+    ["{", indent 2 (vsep (map prettyField (Map.toList fields) <> rowLine)), "}"]
   where
     prettyField (k, TOptional v) = prettyAttrName k <> "?" <+> "::" <+> prettyType 0 v <> ";"
     prettyField (k, v) = prettyAttrName k <+> "::" <+> prettyType 0 v <> ";"

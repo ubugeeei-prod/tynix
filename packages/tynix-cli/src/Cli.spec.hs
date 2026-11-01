@@ -2,7 +2,18 @@
 
 module Main (main) where
 
-import Cli (Command (..), OutputFormat (..), commandOutputFormat, commandOutputPath, commandParser, executeCommand, lspCommandArgs, renderAnalysis, renderVersion, writeOutput)
+import Cli
+  ( Command (..),
+    OutputFormat (..),
+    commandOutputFormat,
+    commandOutputPath,
+    commandParser,
+    executeCommand,
+    lspCommandArgs,
+    renderAnalysis,
+    renderVersion,
+    writeOutput,
+  )
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.List (intercalate, isInfixOf)
@@ -13,8 +24,25 @@ import Data.Text.IO qualified as TextIO
 import Driver (Analysis (..))
 import Ide (Editor (..), InstallOptions (..), Scope (..), defaultInstallOptions)
 import IdeSpec (ideSpec)
-import Options.Applicative (ParserPrefs, ParserResult (..), defaultPrefs, execParserPure, getParseResult, info, renderFailure)
-import System.Directory (createDirectory, createDirectoryIfMissing, createDirectoryLink, doesFileExist, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly)
+import Options.Applicative
+  ( ParserPrefs,
+    ParserResult (..),
+    defaultPrefs,
+    execParserPure,
+    getParseResult,
+    info,
+    renderFailure,
+  )
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    createDirectoryLink,
+    doesFileExist,
+    getTemporaryDirectory,
+    listDirectory,
+    removeFile,
+    removePathForcibly,
+  )
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import System.Timeout (timeout)
@@ -34,21 +62,36 @@ spec = do
 
     it "parses check, emit, init, scaffold, and project commands" $ do
       parse ["check", "main.tynix"] `shouldBe` Just (Check "main.tynix" TextFormat)
-      parse ["check", "main.tynix", "--format", "json"] `shouldBe` Just (Check "main.tynix" JsonFormat)
+      parse ["check", "main.tynix", "--format", "json"]
+        `shouldBe` Just (Check "main.tynix" JsonFormat)
       parse ["emit", "main.tynix"] `shouldBe` Just (Emit "main.tynix" Nothing)
       parse ["init"] `shouldBe` Just (Init Nothing [])
       parse ["scaffold", "demo"] `shouldBe` Just (Scaffold (Just "demo"))
       parse ["check-project"] `shouldBe` Just (CheckProject Nothing TextFormat)
-      parse ["build", "demo", "--format", "json"] `shouldBe` Just (BuildProject (Just "demo") JsonFormat)
-      parse ["emit-project", "demo"] `shouldBe` Just (EmitProject (Just "demo") TextFormat)
+      parse ["build", "demo", "--format", "json"]
+        `shouldBe` Just (BuildProject (Just "demo") JsonFormat)
+      parse ["emit-project", "demo"]
+        `shouldBe` Just (EmitProject (Just "demo") TextFormat)
       parse ["version"] `shouldBe` Just (Version TextFormat)
       parse ["version", "--format", "json"] `shouldBe` Just (Version JsonFormat)
       parse ["lsp"] `shouldBe` Just (Lsp Nothing)
-      parse ["lsp", "--log-file", "tynix-lsp.log"] `shouldBe` Just (Lsp (Just "tynix-lsp.log"))
+      parse ["lsp", "--log-file", "tynix-lsp.log"]
+        `shouldBe` Just (Lsp (Just "tynix-lsp.log"))
 
     it "parses ide, doctor, and init --editor" $ do
-      parse ["ide", "install", "vscode"] `shouldBe` Just (IdeInstall (defaultInstallOptions VSCode))
-      parse ["ide", "install", "nvim", "--global", "--dry-run", "--no-extension", "--force", "--lsp-path", "/bin/tynix-lsp"]
+      parse ["ide", "install", "vscode"]
+        `shouldBe` Just (IdeInstall (defaultInstallOptions VSCode))
+      parse
+        [ "ide",
+          "install",
+          "nvim",
+          "--global",
+          "--dry-run",
+          "--no-extension",
+          "--force",
+          "--lsp-path",
+          "/bin/tynix-lsp"
+        ]
         `shouldBe` Just
           ( IdeInstall
               (defaultInstallOptions Neovim)
@@ -59,13 +102,17 @@ spec = do
                   installLspPath = Just "/bin/tynix-lsp"
                 }
           )
-      parse ["ide", "install", "zed", "--project", "demo"] `shouldBe` Just (IdeInstall (defaultInstallOptions Zed){installScope = ProjectScope "demo"})
-      parse ["ide", "install", "helix", "--project", "demo", "--global"] `shouldBe` Nothing
+      parse ["ide", "install", "zed", "--project", "demo"]
+        `shouldBe` Just
+          (IdeInstall (defaultInstallOptions Zed){installScope = ProjectScope "demo"})
+      parse ["ide", "install", "helix", "--project", "demo", "--global"]
+        `shouldBe` Nothing
       parse ["ide", "install", "emacs"] `shouldBe` Nothing
       parse ["ide", "list"] `shouldBe` Just IdeList
       parse ["doctor"] `shouldBe` Just (Doctor TextFormat)
       parse ["doctor", "--format", "json"] `shouldBe` Just (Doctor JsonFormat)
-      parse ["init", "demo", "--editor", "vscode", "--editor", "helix"] `shouldBe` Just (Init (Just "demo") [VSCode, Helix])
+      parse ["init", "demo", "--editor", "vscode", "--editor", "helix"]
+        `shouldBe` Just (Init (Just "demo") [VSCode, Helix])
 
     it "reports an error for missing subcommands" $ do
       case parserResult [] of
@@ -81,7 +128,11 @@ spec = do
               { analysisProgram = error "unused in cli tests",
                 analysisLocatedProgram = error "unused in cli tests",
                 analysisRoot = Just (Scheme [] tInt),
-                analysisBindings = Map.fromList [("box", Scheme [] tString), ("id", Scheme ["a"] (TFun Many (TVar "a") (TVar "a")))],
+                analysisBindings =
+                  Map.fromList
+                    [ ("box", Scheme [] tString),
+                      ("id", Scheme ["a"] (TFun Many (TVar "a") (TVar "a")))
+                    ],
                 analysisAliases = mempty,
                 analysisAmbient = mempty
               }
@@ -90,8 +141,10 @@ spec = do
 
   describe "commandOutputPath" $
     it "tracks explicit destinations only for write commands" $ do
-      commandOutputPath (Compile "main.tynix" (Just "dist/main.nix") False) `shouldBe` Just "dist/main.nix"
-      commandOutputPath (Emit "main.tynix" (Just "types/main.d.tynix")) `shouldBe` Just "types/main.d.tynix"
+      commandOutputPath (Compile "main.tynix" (Just "dist/main.nix") False)
+        `shouldBe` Just "dist/main.nix"
+      commandOutputPath (Emit "main.tynix" (Just "types/main.d.tynix"))
+        `shouldBe` Just "types/main.d.tynix"
       commandOutputPath (Check "main.tynix" TextFormat) `shouldBe` Nothing
       commandOutputPath (Init Nothing []) `shouldBe` Nothing
       commandOutputPath (Scaffold Nothing) `shouldBe` Nothing
@@ -112,7 +165,8 @@ spec = do
   describe "lspCommandArgs" $
     it "delegates to the standalone server over stdio" $ do
       lspCommandArgs Nothing `shouldBe` ["--stdio"]
-      lspCommandArgs (Just "tynix-lsp.log") `shouldBe` ["--stdio", "--log-file", "tynix-lsp.log"]
+      lspCommandArgs (Just "tynix-lsp.log")
+        `shouldBe` ["--stdio", "--log-file", "tynix-lsp.log"]
 
   describe "renderVersion" $ do
     it "renders text and json version output" $ do
@@ -135,7 +189,8 @@ spec = do
           )
         ]
         ( \root -> do
-            output <- executeCommand (Compile (root <> "/main.tynix") Nothing False) >>= expectRight
+            output <-
+              executeCommand (Compile (root <> "/main.tynix") Nothing False) >>= expectRight
             output `shouldBe` Text.stripEnd (source ["let", "  value = 1;", "in value"])
         )
 
@@ -151,15 +206,18 @@ spec = do
           )
         ]
         ( \root -> do
-            output <- executeCommand (Check (root <> "/main.tynix") TextFormat) >>= expectRight
-            Text.lines output `shouldBe` ["root: forall t0. t0 -> t0", "id :: forall a. a -> a"]
+            output <-
+              executeCommand (Check (root <> "/main.tynix") TextFormat) >>= expectRight
+            Text.lines output
+              `shouldBe` ["root: forall t0. t0 -> t0", "id :: forall a. a -> a"]
         )
 
     it "renders json check output for analyzed files" $
       withTempTree
         [("main.tynix", "1")]
         ( \root -> do
-            output <- executeCommand (Check (root <> "/main.tynix") JsonFormat) >>= expectRight
+            output <-
+              executeCommand (Check (root <> "/main.tynix") JsonFormat) >>= expectRight
             Text.isInfixOf "\"schemaVersion\":1" output `shouldBe` True
             Text.isInfixOf "\"success\":true" output `shouldBe` True
             Text.isInfixOf "\"root\":\"1\"" output `shouldBe` True
@@ -211,7 +269,8 @@ spec = do
         Text.isInfixOf "sourceDir = ./src;" config `shouldBe` True
         Text.isInfixOf "declarationPacks = [];" config `shouldBe` True
         Text.isInfixOf "declare \"./tynix.config.tynix\"" configDecl `shouldBe` True
-        Text.isInfixOf "declarationPacks :: List TynixProjectPath;" configDecl `shouldBe` True
+        Text.isInfixOf "declarationPacks :: List TynixProjectPath;" configDecl
+          `shouldBe` True
         Text.isInfixOf "Hello from" entry `shouldBe` True
         Text.isInfixOf "tynix.config.tynix" output `shouldBe` True
 
@@ -222,12 +281,16 @@ spec = do
         config <- TextIO.readFile (projectRoot </> "tynix.config.tynix")
         entry <- TextIO.readFile (projectRoot </> "src/main.tynix")
         Text.isInfixOf "name = \"quote\\\"and\\\\slash\";" config `shouldBe` True
-        Text.isInfixOf "greeting = \"Hello from quote\\\"and\\\\slash\";" entry `shouldBe` True
+        Text.isInfixOf "greeting = \"Hello from quote\\\"and\\\\slash\";" entry
+          `shouldBe` True
         _ <- executeCommand (Scaffold (Just projectRoot)) >>= expectRight
-        _ <- executeCommand (Check (projectRoot </> "src/main.tynix") TextFormat) >>= expectRight
+        _ <-
+          executeCommand (Check (projectRoot </> "src/main.tynix") TextFormat)
+            >>= expectRight
         pure ()
 
-    it "scaffolds from tynix.config.tynix path overrides without overwriting existing files"
+    it
+      "scaffolds from tynix.config.tynix path overrides without overwriting existing files"
       $ withTempTree
         [ ( "tynix.config.tynix",
             source
@@ -268,10 +331,18 @@ spec = do
         doesFileExist (root </> "types/builtins.d.tynix") `shouldReturn` False
 
     it "reports missing or invalid scaffold configs" $
-      withTempTree [] (\root -> executeCommand (Scaffold (Just root)) >>= (`expectLeftContaining` "missing tynix.config.tynix"))
+      withTempTree
+        []
+        ( \root ->
+            executeCommand (Scaffold (Just root))
+              >>= (`expectLeftContaining` "missing tynix.config.tynix")
+        )
         >> withTempTree
           [("tynix.config.tynix", "{ builtins = 1; }")]
-          (\root -> executeCommand (Scaffold (Just root)) >>= (`expectLeftContaining` "expected Bool for builtins"))
+          ( \root ->
+              executeCommand (Scaffold (Just root))
+                >>= (`expectLeftContaining` "expected Bool for builtins")
+          )
 
     it "checks every discovered source file in a project"
       $ withTempTree
@@ -370,7 +441,9 @@ spec = do
           Left report -> do
             Text.isInfixOf "- ok src/a.tynix" (Text.pack report) `shouldBe` True
             Text.isInfixOf "- error src/b.tynix" (Text.pack report) `shouldBe` True
-          Right output -> expectationFailure ("expected emit-project failure, got: " <> Text.unpack output)
+          Right output ->
+            expectationFailure
+              ("expected emit-project failure, got: " <> Text.unpack output)
         doesFileExist (root </> "generated/a.d.tynix") `shouldReturn` False
         doesFileExist (root </> "generated/b.d.tynix") `shouldReturn` False
 
@@ -453,7 +526,10 @@ spec = do
   describe "project discovery" $ do
     it "honours include and exclude filters" $
       withTempTree
-        [ ("tynix.config.tynix", projectConfig ["include = [ ./src/keep ];", "exclude = [ ./src/keep/skipped.tynix ];"]),
+        [ ( "tynix.config.tynix",
+            projectConfig
+              ["include = [ ./src/keep ];", "exclude = [ ./src/keep/skipped.tynix ];"]
+          ),
           ("flake.nix", "{}"),
           ("src/keep/kept.tynix", "1"),
           ("src/keep/skipped.tynix", "1"),
@@ -514,9 +590,15 @@ spec = do
     it "rejects a field whose type does not match" $ do
       expectConfigError (source ["{ name = 1; }"]) "expected string field"
       expectConfigError (source ["{ builtins = 1; }"]) "expected Bool for builtins"
-      expectConfigError (source ["{ sourceDir = 1; }"]) "expected path-like field for sourceDir"
-      expectConfigError (source ["{ entries = 1; }"]) "expected list of path-like values for entries"
-      expectConfigError (source ["{ entries = [ 1 ]; }"]) "expected path-like item in entries"
+      expectConfigError
+        (source ["{ sourceDir = 1; }"])
+        "expected path-like field for sourceDir"
+      expectConfigError
+        (source ["{ entries = 1; }"])
+        "expected list of path-like values for entries"
+      expectConfigError
+        (source ["{ entries = [ 1 ]; }"])
+        "expected path-like item in entries"
 
   describe "json reports" $ do
     it "stamps every machine-readable payload with the schema version" $
@@ -526,10 +608,16 @@ spec = do
           ("src/main.tynix", "1")
         ]
         ( \root -> do
-            forM_ [CheckProject (Just root) JsonFormat, BuildProject (Just root) JsonFormat, EmitProject (Just root) JsonFormat] $ \command -> do
-              report <- executeCommand command >>= expectRight
-              report `shouldSatisfy` Text.isInfixOf "\"schemaVersion\":1"
-            renderVersion "1.2.3" JsonFormat `shouldSatisfy` Text.isInfixOf "\"schemaVersion\":1"
+            forM_
+              [ CheckProject (Just root) JsonFormat,
+                BuildProject (Just root) JsonFormat,
+                EmitProject (Just root) JsonFormat
+              ]
+              $ \command -> do
+                report <- executeCommand command >>= expectRight
+                report `shouldSatisfy` Text.isInfixOf "\"schemaVersion\":1"
+            renderVersion "1.2.3" JsonFormat
+              `shouldSatisfy` Text.isInfixOf "\"schemaVersion\":1"
         )
 
     it "names the action that produced each report" $
@@ -605,7 +693,12 @@ spec = do
 projectConfig :: [Text] -> Text
 projectConfig extra =
   source $
-    ["{", "  name = \"spec\";", "  sourceDir = ./src;", "  entry = ./src/main.tynix;", "  builtins = false;"]
+    [ "{",
+      "  name = \"spec\";",
+      "  sourceDir = ./src;",
+      "  entry = ./src/main.tynix;",
+      "  builtins = false;"
+    ]
       <> map ("  " <>) extra
       <> ["}"]
 
@@ -625,14 +718,19 @@ readFileText = TextIO.readFile
 
 expectRight :: (Show e) => Either e a -> IO a
 expectRight (Right value) = pure value
-expectRight (Left err) = expectationFailure ("expected Right, got Left: " <> show err) >> fail "expected Right"
+expectRight (Left err) =
+  expectationFailure ("expected Right, got Left: " <> show err)
+    >> fail "expected Right"
 
 expectLeftContaining :: Either String a -> String -> Expectation
 expectLeftContaining result needle =
   case result of
     Left err | Text.pack needle `Text.isInfixOf` Text.pack err -> pure ()
-    Left err -> expectationFailure ("expected error containing " <> show needle <> ", got " <> show err)
-    Right _ -> expectationFailure ("expected Left containing " <> show needle <> ", got Right")
+    Left err ->
+      expectationFailure
+        ("expected error containing " <> show needle <> ", got " <> show err)
+    Right _ ->
+      expectationFailure ("expected Left containing " <> show needle <> ", got Right")
 
 source :: [Text] -> Text
 source = Text.unlines
@@ -641,7 +739,8 @@ deepPath :: Int -> FilePath
 deepPath n = intercalate "/" (replicate n "deep")
 
 withTempTree :: [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
-withTempTree files action = bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
+withTempTree files action =
+  bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
   where
     createRoot = do
       tmp <- getTemporaryDirectory

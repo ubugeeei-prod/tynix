@@ -51,7 +51,12 @@ inferAliasKinds :: [TypeAlias] -> Either String AliasKindEnv
 inferAliasKinds aliases =
   evalStateT (inferAll (Map.elems (mkAliasEnv aliases))) initialState
   where
-    initialState = KindState{nextKindMeta = 0, kindSubstitutions = Map.empty, flexibleKinds = Map.empty}
+    initialState =
+      KindState
+        { nextKindMeta = 0,
+          kindSubstitutions = Map.empty,
+          flexibleKinds = Map.empty
+        }
 
 -- | Infer the kind of one type under a known alias environment.
 --
@@ -86,7 +91,9 @@ validateProgramKinds aliases program = do
   void $
     evalStateT
       ( do
-          traverse_ (validateKind env "ambient entry" . ambientEntryType) ambientDeclEntries
+          traverse_
+            (validateKind env "ambient entry" . ambientEntryType)
+            ambientDeclEntries
           traverse_ (validateKind env "term annotation") annotationTypes
       )
       initialState
@@ -111,19 +118,25 @@ inferAll aliases = do
         aliases
   let aliasKinds =
         Map.map
-          (\placeholder -> foldr KFun (placeholderResult placeholder) (placeholderParams placeholder))
+          ( \placeholder -> foldr KFun (placeholderResult placeholder) (placeholderParams placeholder)
+          )
           placeholders
       env = builtinKinds <> aliasKinds
   traverse_ (inferAliasBody env placeholders) aliases
   traverse zonkKind aliasKinds
 
-inferAliasBody :: AliasKindEnv -> Map Name AliasPlaceholder -> TypeAlias -> KindM ()
+inferAliasBody ::
+  AliasKindEnv -> Map Name AliasPlaceholder -> TypeAlias -> KindM ()
 inferAliasBody env placeholders alias =
   case Map.lookup (typeAliasName alias) placeholders of
     Nothing ->
       -- Placeholders are constructed from the same alias list passed in here,
       -- so a missing entry signals an inference bug rather than a user error.
-      liftLeft (withCode TK0004MissingAliasPlaceholder ("internal: missing kind placeholder for alias " <> show (typeAliasName alias)))
+      liftLeft
+        ( withCode
+            TK0004MissingAliasPlaceholder
+            ("internal: missing kind placeholder for alias " <> show (typeAliasName alias))
+        )
     Just placeholder -> do
       let local = Map.fromList (zip (typeAliasParams alias) (placeholderParams placeholder))
       bodyKind <- inferKind env local (typeAliasBody alias)
@@ -141,7 +154,10 @@ inferKind env local = \case
   TUnknown -> pure KType
   TFun _ left right -> inferTypeLeaf env local left >> inferTypeLeaf env local right >> pure KType
   TRecord fields -> traverse_ (inferTypeLeaf env local) fields >> pure KType
-  TOpenRecord fields tail' -> traverse_ (inferTypeLeaf env local) fields >> inferTypeLeaf env local tail' >> pure KType
+  TOpenRecord fields tail' ->
+    traverse_ (inferTypeLeaf env local) fields
+      >> inferTypeLeaf env local tail'
+      >> pure KType
   TOptional inner -> inferTypeLeaf env local inner >> pure KType
   TUnion members -> traverse_ (inferTypeLeaf env local) members >> pure KType
   TApp fun arg -> do
@@ -166,7 +182,10 @@ inferKind env local = \case
 
 -- | One kind annotation slot per parameter.
 paddedKinds :: TypeAlias -> [Maybe Kind]
-paddedKinds alias = take (length (typeAliasParams alias)) (typeAliasParamKinds alias <> repeat Nothing)
+paddedKinds alias =
+  take
+    (length (typeAliasParams alias))
+    (typeAliasParamKinds alias <> repeat Nothing)
 
 inferTypeLeaf :: AliasKindEnv -> Map Name Kind -> Type -> KindM ()
 inferTypeLeaf env local ty = do
@@ -196,7 +215,8 @@ validateResolvedKind kind = do
   finalKind <- zonkKind kind
   case finalKind of
     KMeta n -> do
-      modify' (\st -> st{kindSubstitutions = Map.insert n KType (kindSubstitutions st)})
+      modify'
+        (\st -> st{kindSubstitutions = Map.insert n KType (kindSubstitutions st)})
       pure KType
     other -> pure other
 
@@ -213,7 +233,8 @@ flexibleKind name = do
     Just kind -> pure kind
     Nothing -> do
       kind <- freshKindMeta
-      modify' (\state -> state{flexibleKinds = Map.insert name kind (flexibleKinds state)})
+      modify'
+        (\state -> state{flexibleKinds = Map.insert name kind (flexibleKinds state)})
       pure kind
 
 zonkKind :: Kind -> KindM Kind
@@ -236,7 +257,12 @@ unifyKind left right = do
     (kind, KMeta n) -> bindKindMeta n kind
     (KType, KType) -> pure KType
     (KFun a b, KFun c d) -> KFun <$> unifyKind a c <*> unifyKind b d
-    _ -> liftLeft (withCode TK0001KindMismatch ("kind mismatch: " <> showKind left' <> " vs " <> showKind right'))
+    _ ->
+      liftLeft
+        ( withCode
+            TK0001KindMismatch
+            ("kind mismatch: " <> showKind left' <> " vs " <> showKind right')
+        )
 
 bindKindMeta :: Int -> Kind -> KindM Kind
 bindKindMeta n kind = do
@@ -244,7 +270,8 @@ bindKindMeta n kind = do
   if resolved == KMeta n || occursKind n resolved
     then liftLeft (withCode TK0002KindOccursCheck "kind occurs check failed")
     else do
-      modify' (\st -> st{kindSubstitutions = Map.insert n resolved (kindSubstitutions st)})
+      modify'
+        (\st -> st{kindSubstitutions = Map.insert n resolved (kindSubstitutions st)})
       pure resolved
 
 occursKind :: Int -> Kind -> Bool

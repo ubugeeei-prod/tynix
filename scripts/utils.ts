@@ -5,7 +5,11 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 
 export const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-export function run(command: string, args: string[], options: SpawnSyncOptions = {}): void {
+export function run(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptions = {},
+): void {
   const result = spawnSync(command, args, {
     stdio: "inherit",
     cwd: rootDir,
@@ -21,7 +25,11 @@ export function run(command: string, args: string[], options: SpawnSyncOptions =
   }
 }
 
-export function capture(command: string, args: string[], options: SpawnSyncOptions = {}): string {
+export function capture(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptions = {},
+): string {
   const result = spawnSync(command, args, {
     stdio: ["inherit", "pipe", "inherit"],
     encoding: "utf8",
@@ -40,7 +48,11 @@ export function capture(command: string, args: string[], options: SpawnSyncOptio
   return result.stdout.trim();
 }
 
-export function tryRun(command: string, args: string[], options: SpawnSyncOptions = {}): boolean {
+export function tryRun(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptions = {},
+): boolean {
   const result = spawnSync(command, args, {
     stdio: "ignore",
     cwd: rootDir,
@@ -50,54 +62,39 @@ export function tryRun(command: string, args: string[], options: SpawnSyncOption
   return result.status === 0;
 }
 
+function executableNames(name: string, isWindows: boolean): string[] {
+  if (!isWindows || /\.[^./\\]+$/.test(name)) {
+    return [name];
+  }
+  const extensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter((extension) => extension.length > 0);
+  return [name, ...extensions.map((extension) => name + extension)];
+}
+
+function isExecutable(path: string, isWindows: boolean): boolean {
+  if (!existsSync(path)) return false;
+  // Windows resolves executables by PATHEXT; its execute bit is not meaningful.
+  if (isWindows) return true;
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function findExecutable(name: string): string | undefined {
-  const pathValue = process.env.PATH ?? "";
   const isWindows = process.platform === "win32";
-
-  // On Windows, executables are resolved by appending one of the PATHEXT
-  // extensions (unless the name already carries one). Elsewhere the name is
-  // used verbatim.
-  const candidateNames = (() => {
-    if (!isWindows) {
-      return [name];
-    }
-    const hasExtension = /\.[^./\\]+$/.test(name);
-    if (hasExtension) {
-      return [name];
-    }
-    const pathext = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
-      .split(";")
-      .map((ext) => ext.trim())
-      .filter((ext) => ext.length > 0);
-    return [name, ...pathext.map((ext) => name + ext)];
-  })();
-
-  for (const entry of pathValue.split(delimiter)) {
-    if (!entry) {
-      continue;
-    }
-
-    for (const candidateName of candidateNames) {
-      const candidate = join(entry, candidateName);
-      if (!existsSync(candidate)) {
-        continue;
-      }
-
-      // The execute bit is not meaningful on Windows; existence on PATH is
-      // sufficient there.
-      if (isWindows) {
-        return candidate;
-      }
-
-      try {
-        accessSync(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        continue;
-      }
+  const names = executableNames(name, isWindows);
+  const directories = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  for (const directory of directories) {
+    for (const candidateName of names) {
+      const candidate = join(directory, candidateName);
+      if (isExecutable(candidate, isWindows)) return candidate;
     }
   }
-
   return undefined;
 }
 

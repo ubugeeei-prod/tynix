@@ -361,7 +361,11 @@ stripLocations = go
       SelectDynamic e -> SelectDynamic (go e)
       other -> other
     goPat = \case
-      PAttrSet fields open binder -> PAttrSet [f{patternFieldDefault = go <$> patternFieldDefault f} | f <- fields] open binder
+      PAttrSet fields open binder ->
+        PAttrSet
+          [f{patternFieldDefault = go <$> patternFieldDefault f} | f <- fields]
+          open
+          binder
       other -> other
     goLet = \case
       LetBinding n e -> LetBinding n (go e)
@@ -416,7 +420,10 @@ exprAnnotations = go
       SelectName _ -> []
     goPat = \case
       PVar _ ann -> maybe [] pure ann
-      PAttrSet fields _ _ -> foldMap (\f -> maybe [] pure (patternFieldType f) <> foldMap go (patternFieldDefault f)) fields
+      PAttrSet fields _ _ ->
+        foldMap
+          (\f -> maybe [] pure (patternFieldType f) <> foldMap go (patternFieldDefault f))
+          fields
     goLet = \case
       LetSignature _ ty -> [ty]
       LetBinding _ e -> go e

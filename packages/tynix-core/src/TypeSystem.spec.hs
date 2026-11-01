@@ -72,12 +72,19 @@ spec = do
 
   describe "effects" $ do
     it "infers latent effects from the builtins a function calls" $
-      rootOf "msg: builtins.trace msg msg" `shouldReturn` Just "forall t0. t0 -> t0 ! {Trace}"
+      rootOf "msg: builtins.trace msg msg"
+        `shouldReturn` Just "forall t0. t0 -> t0 ! {Trace}"
 
     it "rejects an effect a signature does not admit" $
       rejects
         "main.tynix"
-        (source ["let", "  f :: String -> String ! {};", "  f = msg: builtins.trace msg msg;", "in f"])
+        ( source
+            [ "let",
+              "  f :: String -> String ! {};",
+              "  f = msg: builtins.trace msg msg;",
+              "in f"
+            ]
+        )
         "[TC0023] effect `Trace` is not allowed here"
 
     it "lets tryEval discharge Throw" $
@@ -91,17 +98,40 @@ spec = do
         )
 
     it "keeps effect variables rigid in signatures" $ do
-      accepts (source ["let", "  app :: forall a b e. (a -> b ! e) -> a -> b ! e;", "  app = f: x: f x;", "in app"])
+      accepts
+        ( source
+            [ "let",
+              "  app :: forall a b e. (a -> b ! e) -> a -> b ! e;",
+              "  app = f: x: f x;",
+              "in app"
+            ]
+        )
       rejects
         "main.tynix"
-        (source ["let", "  app :: forall a b e. (a -> b ! e) -> a -> b ! {};", "  app = f: x: f x;", "in app"])
+        ( source
+            [ "let",
+              "  app :: forall a b e. (a -> b ! e) -> a -> b ! {};",
+              "  app = f: x: f x;",
+              "in app"
+            ]
+        )
         "TC0023"
 
     it "treats arrows without an effect row as untracked" $
-      accepts (source ["let", "  f :: String -> String;", "  f = msg: builtins.trace msg msg;", "in f"])
+      accepts
+        ( source
+            [ "let",
+              "  f :: String -> String;",
+              "  f = msg: builtins.trace msg msg;",
+              "in f"
+            ]
+        )
 
     it "forbids impure builtins in flakes" $ do
-      rejects "flake.tynix" "{ outputs = _: { home = builtins.getEnv \"HOME\"; }; }" "TC0024"
+      rejects
+        "flake.tynix"
+        "{ outputs = _: { home = builtins.getEnv \"HOME\"; }; }"
+        "TC0024"
       rejects "flake.tynix" "{ outputs = _: builtins.currentSystem; }" "TC0024"
       accepts "{ home = builtins.getEnv \"HOME\"; }"
 
@@ -111,7 +141,10 @@ spec = do
       accepts (linear "x: if true then x else x + 1")
 
     it "rejects branches that disagree" $
-      rejects "main.tynix" (linear "x: if true then x else 0") "is not used exactly once on every branch"
+      rejects
+        "main.tynix"
+        (linear "x: if true then x else 0")
+        "is not used exactly once on every branch"
 
     it "counts uses inside closures and unrestricted calls as many" $ do
       rejects "main.tynix" (linear "x: (y: x) 1") "is used more than once"
@@ -133,7 +166,9 @@ spec = do
     let program captures =
           source
             [ "let",
-              "  mk :: (String -> String ! { Fetch }) -> String ->" <> captures <> " String ! { Fetch };",
+              "  mk :: (String -> String ! { Fetch }) -> String ->"
+                <> captures
+                <> " String ! { Fetch };",
               "  mk = fetch: url: fetch url;",
               "in mk"
             ]
@@ -166,7 +201,11 @@ spec = do
     it "hides the representation's fields" $
       rejects
         "main.tynix"
-        (source ["opaque type Secret = { value :: String; };", "let s = { value = \"x\"; } as Secret; in s.value"])
+        ( source
+            [ "opaque type Secret = { value :: String; };",
+              "let s = { value = \"x\"; } as Secret; in s.value"
+            ]
+        )
         "TC0027"
 
   describe "dependent types" $ do
@@ -192,8 +231,12 @@ spec = do
 
   describe "higher-kinded types" $ do
     it "honours explicit kind annotations" $ do
-      accepts "type App (f :: Type -> Type) a = f a; let xs :: App List Int; xs = [ 1 ]; in xs"
-      rejects "main.tynix" "type Bad (f :: Type) = f Int; let x :: Bad Int; x = 1; in x" "TK0001"
+      accepts
+        "type App (f :: Type -> Type) a = f a; let xs :: App List Int; xs = [ 1 ]; in xs"
+      rejects
+        "main.tynix"
+        "type Bad (f :: Type) = f Int; let x :: Bad Int; x = 1; in x"
+        "TK0001"
 
   describe "macros" $ do
     let enumMacro =
@@ -220,7 +263,13 @@ spec = do
     it "checks typed arguments at the call site" $
       rejects
         "main.tynix"
-        (source ["macro unless {", "  ($c :: Bool, $body:expr) => (if $c then null else $body);", "};", "unless!(\"yes\", 1)"])
+        ( source
+            [ "macro unless {",
+              "  ($c :: Bool, $body:expr) => (if $c then null else $body);",
+              "};",
+              "unless!(\"yes\", 1)"
+            ]
+        )
         "\"yes\" vs Bool"
 
     it "type-checks templates at their definition" $
@@ -254,8 +303,14 @@ spec = do
       rejects "main.tynix" (source (enumMacro <> ["enum!(1 + 2)"])) "TX0001"
 
     it "rejects templates that depend on the call site's scope" $ do
-      rejects "main.tynix" (source ["macro m {", "  ($x:expr) => (lib.id $x);", "};", "1"]) "TX0003"
-      rejects "main.tynix" (source ["macro m {", "  ($x:expr) => (with $x; a);", "};", "1"]) "TX0003"
+      rejects
+        "main.tynix"
+        (source ["macro m {", "  ($x:expr) => (lib.id $x);", "};", "1"])
+        "TX0003"
+      rejects
+        "main.tynix"
+        (source ["macro m {", "  ($x:expr) => (with $x; a);", "};", "1"])
+        "TX0003"
 
     it "pins globals so the call site cannot hijack them" $ do
       let program =
@@ -268,7 +323,10 @@ spec = do
       rootOf program `shouldReturn` Just "List String"
 
     it "stops runaway recursion" $
-      rejects "main.tynix" (source ["macro loop {", "  ($x:expr) => (loop!($x));", "};", "loop!(1)"]) "TX0005"
+      rejects
+        "main.tynix"
+        (source ["macro loop {", "  ($x:expr) => (loop!($x));", "};", "loop!(1)"])
+        "TX0005"
 
     it "rejects metavariables outside templates" $
       rejects "main.tynix" "$x" "TX0006"

@@ -89,7 +89,10 @@ parseProgramDetailed path input = stripProgramLocations <$> parseProgramLocatedD
 parseProgramLocatedDetailed :: FilePath -> Text -> Either ParseError Program
 parseProgramLocatedDetailed path input = do
   directives <- mapDirectiveError input (scanDiagnosticDirectives input)
-  case runParser (runReaderT (sc *> programParser <* eof) mempty{envDirectives = directives}) path input of
+  case runParser
+    (runReaderT (sc *> programParser <* eof) mempty{envDirectives = directives})
+    path
+    input of
     Left bundle -> Left (megaparsecError bundle)
     Right program ->
       case foldMap (strayPlaceholders . markedValue) (programExpr program) of
@@ -100,17 +103,26 @@ parseProgramLocatedDetailed path input = do
               { parseErrorLine = 1,
                 parseErrorColumn = 1,
                 parseErrorMessage =
-                  withCodeText TX0006StrayMacroVariable ("macro metavariable `" <> stray <> "` used outside a macro template")
+                  withCodeText
+                    TX0006StrayMacroVariable
+                    ("macro metavariable `" <> stray <> "` used outside a macro template")
               }
 
 mapDirectiveError :: Text -> Either Text a -> Either ParseError a
 mapDirectiveError _ (Right a) = Right a
 mapDirectiveError _ (Left message) =
-  Left ParseError{parseErrorLine = 1, parseErrorColumn = 1, parseErrorMessage = message}
+  Left
+    ParseError
+      { parseErrorLine = 1,
+        parseErrorColumn = 1,
+        parseErrorMessage = message
+      }
 
 -- | Lift the first error in a Megaparsec bundle into our structured form,
 -- recovering the offending source line/column from the parser's PosState.
-megaparsecError :: (TraversableStream s, VisualStream s, ShowErrorComponent e) => ParseErrorBundle s e -> ParseError
+megaparsecError ::
+  (TraversableStream s, VisualStream s, ShowErrorComponent e) =>
+  ParseErrorBundle s e -> ParseError
 megaparsecError bundle =
   let firstError :| _ = bundleErrors bundle
       (_, finalState) = reachOffset (errorOffset firstError) (bundlePosState bundle)
@@ -136,24 +148,34 @@ scanDiagnosticDirectives input = go 1 Nothing Map.empty (Text.lines input)
   where
     go _ Nothing acc [] = Right acc
     go lineNo (Just _) _ [] =
-      Left (withCodeText TP0001DanglingDirective ("dangling tynix diagnostic directive before end of file at line " <> Text.pack (show (lineNo - 1))))
+      Left
+        ( withCodeText
+            TP0001DanglingDirective
+            ( "dangling tynix diagnostic directive before end of file at line "
+                <> Text.pack (show (lineNo - 1))
+            )
+        )
     go lineNo pending acc (line : rest) =
-      case parseDirective line of
-        Just directive ->
-          case pending of
-            Just _ ->
-              Left (withCodeText TP0002DuplicateDirectiveSameLine ("multiple tynix diagnostic directives target the same next line before line " <> Text.pack (show lineNo)))
-            Nothing -> go (lineNo + 1) (Just directive) acc rest
-        Nothing
-          | isSkippableLine line -> go (lineNo + 1) pending acc rest
-          | otherwise ->
-              case pending of
-                Nothing -> go (lineNo + 1) Nothing acc rest
-                Just directive ->
-                  case Map.lookup lineNo acc of
-                    Just _ ->
-                      Left (withCodeText TP0003DuplicateDirectivePerLine ("duplicate tynix diagnostic directives for line " <> Text.pack (show lineNo)))
-                    Nothing -> go (lineNo + 1) Nothing (Map.insert lineNo directive acc) rest
+      case (parseDirective line, pending) of
+        (Just _, Just _) ->
+          Left
+            ( withCodeText
+                TP0002DuplicateDirectiveSameLine
+                ( "multiple tynix diagnostic directives target the same next line before line "
+                    <> Text.pack (show lineNo)
+                )
+            )
+        (Just directive, Nothing) -> go (lineNo + 1) (Just directive) acc rest
+        (Nothing, _) | isSkippableLine line -> go (lineNo + 1) pending acc rest
+        (Nothing, Nothing) -> go (lineNo + 1) Nothing acc rest
+        (Nothing, Just directive)
+          | Map.member lineNo acc ->
+              Left
+                ( withCodeText
+                    TP0003DuplicateDirectivePerLine
+                    ("duplicate tynix diagnostic directives for line " <> Text.pack (show lineNo))
+                )
+          | otherwise -> go (lineNo + 1) Nothing (Map.insert lineNo directive acc) rest
 
 parseDirective :: Text -> Maybe DiagnosticDirective
 parseDirective raw =

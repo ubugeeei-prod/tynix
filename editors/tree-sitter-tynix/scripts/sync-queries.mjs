@@ -19,11 +19,14 @@ const source = join(grammarDir, "queries");
 const target = resolve(grammarDir, "..", "neovim", "queries", "tynix");
 const check = process.argv.includes("--check");
 
-const header = "; Generated from editors/tree-sitter-tynix/queries by scripts/sync-queries.mjs. Do not edit.\n";
+const header =
+  "; Generated from editors/tree-sitter-tynix/queries by scripts/sync-queries.mjs. Do not edit.\n";
 
 let stale = 0;
 mkdirSync(target, { recursive: true });
-for (const name of readdirSync(source).filter((file) => file.endsWith(".scm"))) {
+for (const name of readdirSync(source).filter((file) =>
+  file.endsWith(".scm"),
+)) {
   const expected = header + readFileSync(join(source, name), "utf8");
   const destination = join(target, name);
   let current = null;
@@ -43,6 +46,8 @@ for (const name of readdirSync(source).filter((file) => file.endsWith(".scm"))) 
 }
 
 if (check && stale > 0) {
-  console.log("run `node editors/tree-sitter-tynix/scripts/sync-queries.mjs` to refresh");
+  console.log(
+    "run `node editors/tree-sitter-tynix/scripts/sync-queries.mjs` to refresh",
+  );
   process.exit(1);
 }

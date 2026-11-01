@@ -14,13 +14,21 @@ stride=${2:-25}
 limit=${3:-1000}
 # Resolve the locked nixpkgs from flake.lock directly; evaluating the flake
 # itself would copy the whole working tree into the store.
-nixpkgs=$(nix eval --raw --impure --expr 'let lock = builtins.fromJSON (builtins.readFile ./flake.lock); in (builtins.fetchTree lock.nodes.nixpkgs.locked).outPath')
+nixpkgs=$(nix eval --raw --impure --expr '
+  let lock = builtins.fromJSON (builtins.readFile ./flake.lock);
+  in (builtins.fetchTree lock.nodes.nixpkgs.locked).outPath
+')
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-normalize() { sed 's/" + "//g' | perl -pe '1 while s/\("((?:[^"\\]|\\.)*)"\)/"$1"/g'; }
+normalize() {
+  sed 's/" + "//g' | perl -pe '1 while s/\("((?:[^"\\]|\\.)*)"\)/"$1"/g'
+}
 
-find "$nixpkgs" -name '*.nix' -not -path '*/tests/*' | sort | awk -v s="$stride" 'NR % s == 0' | head -n "$limit" > "$work/files"
+find "$nixpkgs" -name '*.nix' -not -path '*/tests/*' |
+  sort |
+  awk -v s="$stride" 'NR % s == 0' |
+  head -n "$limit" > "$work/files"
 total=0
 failed=0
 while IFS= read -r file; do
@@ -33,7 +41,10 @@ while IFS= read -r file; do
     continue
   fi
   expected=$(nix-instantiate --parse "$file" | normalize)
-  actual=$(cd "$(dirname "$file")" && nix-instantiate --parse - < "$work/output.nix" | normalize) || actual="<parse error>"
+  actual=$(
+    cd "$(dirname "$file")" &&
+      nix-instantiate --parse - < "$work/output.nix" | normalize
+  ) || actual="<parse error>"
   if [ "$expected" != "$actual" ]; then
     failed=$((failed + 1))
     echo "round-trip changed the expression: $file"

@@ -26,7 +26,9 @@ console.log();
 console.log("Installed binaries:");
 
 if (!tynixPath || !tynixLspPath) {
-  console.error("Expected `tynix` and `tynix-lsp` to be available on PATH after installation.");
+  console.error(
+    "Expected `tynix` and `tynix-lsp` to be available on PATH after installation.",
+  );
   process.exit(1);
 }
 

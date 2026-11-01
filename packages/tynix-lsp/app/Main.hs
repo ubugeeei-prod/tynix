@@ -27,9 +27,16 @@ import AnalysisCache
   )
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Exception (IOException, SomeException, fromException, throwIO, try)
+import Control.Exception
+  ( IOException,
+    SomeException,
+    fromException,
+    throwIO,
+    try,
+  )
 import Control.Monad (forM_, void, when)
 import Data.Aeson
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy.Char8 qualified as LB8
 import Data.IORef
 import Data.Map.Strict (Map)
@@ -41,10 +48,23 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Version (showVersion)
-import Driver (Analysis (..), SupportCache, analyzeTextForEditorWith, newSupportCache)
+import Driver
+  ( Analysis (..),
+    SupportCache,
+    analyzeTextForEditorWith,
+    newSupportCache,
+  )
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Paths_tynix_lsp qualified as PackageInfo
-import Server (asText, clearDiagnostics, field, pathUri, respond, respondError, serverCapabilities)
+import Server
+  ( asText,
+    clearDiagnostics,
+    field,
+    pathUri,
+    respond,
+    respondError,
+    serverCapabilities,
+  )
 import ServerProtocol (ReadOutcome (..), notify, readMessageOutcome)
 import Session qualified
 import System.Environment (getArgs)
@@ -219,9 +239,13 @@ guarded st msg action = do
           notify
             stdout
             "window/logMessage"
-            (object ["type" .= (1 :: Int), "message" .= ("tynix-lsp internal error: " <> detail)])
+            ( object
+                ["type" .= (1 :: Int), "message" .= ("tynix-lsp internal error: " <> detail)]
+            )
           case msg of
-            Just m | Just _ <- field "id" m -> respondError stdout m (-32603) ("internal error: " <> detail)
+            Just m
+              | Just _ <- field "id" m ->
+                  respondError stdout m (-32603) ("internal error: " <> detail)
             _ -> pure ()
 
 -- | The cached analyzer. A fresh declaration-support cache is used per call
@@ -232,7 +256,12 @@ analyzer st = cachedAnalyzeText (stCache st) <$> newSupportCache
 -- | Wrap the driver with the workspace-wide analysis cache so repeated
 -- hover / workspace-symbol / definition requests against unchanged content
 -- collapse to a single driver invocation.
-cachedAnalyzeText :: IORef AnalysisCache -> SupportCache -> FilePath -> Text -> IO (Either String Analysis)
+cachedAnalyzeText ::
+  IORef AnalysisCache ->
+  SupportCache ->
+  FilePath ->
+  Text ->
+  IO (Either String Analysis)
 cachedAnalyzeText cacheRef supportCache file content = do
   cache <- readIORef cacheRef
   case accessAnalysisCache (file, content) cache of
@@ -309,7 +338,11 @@ handle st msg = do
     Just "textDocument/rename" -> query Session.renameDocument
     Just "textDocument/documentSymbol" -> do
       hierarchical <- readIORef (stHierarchicalSymbols st)
-      query (if hierarchical then Session.documentSymbolsHierarchicalDocument else Session.documentSymbolsDocument)
+      query
+        ( if hierarchical
+            then Session.documentSymbolsHierarchicalDocument
+            else Session.documentSymbolsDocument
+        )
     Just "workspace/symbol" -> query Session.workspaceSymbolsDocument
     Just "textDocument/codeAction" -> query Session.codeActionsDocument
     Just "textDocument/semanticTokens/full" -> query Session.semanticTokensDocument
@@ -334,8 +367,11 @@ handle st msg = do
       Nothing -> pure ()
 
 withServerInfo :: Value -> Value
-withServerInfo (Object obj) =
-  Object (obj <> (case object ["serverInfo" .= object ["name" .= ("tynix-lsp" :: Text), "version" .= showVersion PackageInfo.version]] of Object o -> o; _ -> mempty))
+withServerInfo (Object obj) = Object (obj <> KeyMap.singleton "serverInfo" serverInfo)
+  where
+    serverInfo =
+      object
+        ["name" .= ("tynix-lsp" :: Text), "version" .= showVersion PackageInfo.version]
 withServerInfo other = other
 
 -- | Analyse a document now (open / save / unopened change) and publish.
@@ -353,7 +389,10 @@ updateNow st analyze msg = do
 -- | Bump the edit generation and enqueue a debounced re-analysis.
 scheduleAnalysis :: ServerState -> FilePath -> IO ()
 scheduleAnalysis st file = do
-  generation <- atomicModifyIORef' (stGenerations st) (\m -> let g = Map.findWithDefault 0 file m + 1 in (Map.insert file g m, g))
+  generation <-
+    atomicModifyIORef'
+      (stGenerations st)
+      (\m -> let g = Map.findWithDefault 0 file m + 1 in (Map.insert file g m, g))
   void . forkIO $ do
     threadDelay debounceMicros
     writeChan (stQueue st) (Debounced file generation)
@@ -371,15 +410,20 @@ analyzeAndPublish st file = do
       publish st analyze file content result
 
 -- | Publish diagnostics unless the client pulls them.
-publish :: ServerState -> AnalyzeFn -> FilePath -> Text -> Either String Analysis -> IO ()
+publish ::
+  ServerState -> AnalyzeFn -> FilePath -> Text -> Either String Analysis -> IO ()
 publish st analyze file content result = do
   pull <- readIORef (stPullDiagnostics st)
   if pull
     then pure ()
     else do
       docs <- readIORef (stDocs st)
-      items <- Session.documentDiagnostics readFileSafe analyze docs file content result
-      notify stdout "textDocument/publishDiagnostics" (object ["uri" .= pathUri file, "diagnostics" .= items])
+      items <-
+        Session.documentDiagnostics readFileSafe analyze docs file content result
+      notify
+        stdout
+        "textDocument/publishDiagnostics"
+        (object ["uri" .= pathUri file, "diagnostics" .= items])
 
 -- | Drop a document from the in-memory cache and clear its diagnostics.
 closeDocument :: ServerState -> Value -> IO ()

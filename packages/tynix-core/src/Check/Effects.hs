@@ -41,7 +41,12 @@ perform :: CheckContext -> Type -> InferM ()
 perform ctx row = do
   row' <- zonk row
   when (checkPureEval ctx && "Impure" `elem` effectLabels row') $
-    throwCheck (withCode TC0024ImpureInPureEval "impure operation in pure evaluation: flakes cannot read the environment, the clock, or the host platform")
+    throwCheck
+      ( withCode
+          TC0024ImpureInPureEval
+          "impure operation in pure evaluation: flakes cannot read the \
+          \environment, the clock, or the host platform"
+      )
   ambient <- ambientEffects
   subsumeEffects row' ambient
 
@@ -51,7 +56,9 @@ constrainEffects :: Type -> Type -> InferM ()
 constrainEffects actual expected = do
   actual' <- zonk actual
   expected' <- zonk expected
-  unless (actual' == TDynamic || expected' == TDynamic) (subsumeEffects actual' expected')
+  unless
+    (actual' == TDynamic || expected' == TDynamic)
+    (subsumeEffects actual' expected')
 
 -- | Make @target@ admit every effect of @actual@: each label must be present
 -- (an open tail is extended), and an effect variable of @actual@ must be the
@@ -89,7 +96,11 @@ requireLabel row label =
       throwCheck
         ( withCode
             TC0023EffectNotAllowed
-            ("effect `" <> T.unpack label <> "` is not allowed here: the expected effects are " <> showEffects other)
+            ( "effect `"
+                <> T.unpack label
+                <> "` is not allowed here: the expected effects are "
+                <> showEffects other
+            )
         )
 
 requireVar :: Name -> Type -> InferM ()
@@ -103,7 +114,11 @@ requireVar var row =
       throwCheck
         ( withCode
             TC0023EffectNotAllowed
-            ("effects `" <> T.unpack var <> "` of a polymorphic callee are not allowed here: the expected effects are " <> showEffects other)
+            ( "effects `"
+                <> T.unpack var
+                <> "` of a polymorphic callee are not allowed here: the expected effects are "
+                <> showEffects other
+            )
         )
 
 showEffects :: Type -> String

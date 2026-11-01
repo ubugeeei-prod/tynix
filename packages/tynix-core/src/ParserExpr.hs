@@ -126,7 +126,9 @@ located parser = do
 
 -- | Parse any expression form.
 expressionParser :: Parser Expr
-expressionParser = located (choice [ifParser, letParser, assertParser, withParser, lambdaParser, pipeParser])
+expressionParser =
+  located
+    (choice [ifParser, letParser, assertParser, withParser, lambdaParser, pipeParser])
 
 -- | Parse a Nix-style conditional expression.
 ifParser :: Parser Expr
@@ -219,7 +221,11 @@ lambdaParser = do
     lambdaColon = \case
       PVar _ Nothing -> lexeme (char ':' <* notFollowedBy (satisfy uriChar))
       _ -> lexeme (char ':' <* notFollowedBy (char ':'))
-    uriChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c `elem` ("%/?:@&=+$,-_.!~*'" :: String)
+    uriChar c =
+      isAsciiLower c
+        || isAsciiUpper c
+        || isDigit c
+        || c `elem` ("%/?:@&=+$,-_.!~*'" :: String)
 
 -- | Parse the pipe operators (`|>` left-associative, `<|` right-associative),
 -- which bind loosest of all operators. Mixing the two without parentheses is
@@ -277,7 +283,9 @@ updateParser = chainRight1 notParser (binary OpUpdate <$ symbol "//")
 
 -- | Parse prefix boolean negation, falling through to numeric addition.
 notParser :: Parser Expr
-notParser = located ((EUnaryOp OpNot <$> (operator "!" "=" *> notParser)) <|> additionParser)
+notParser =
+  located
+    ((EUnaryOp OpNot <$> (operator "!" "=" *> notParser)) <|> additionParser)
 
 -- | Parse left-associated additive arithmetic (`+`, `-`).
 additionParser :: Parser Expr
@@ -408,14 +416,25 @@ macroParser = do
   rawRules <- braces (many ruleParser)
   _ <- symbol ";"
   end <- getOffset
-  when (null rawRules) $ failAt start (withCode TX0002InvalidMacroPattern ("macro `" <> Text.unpack name <> "` has no rules"))
+  when (null rawRules) $
+    failAt
+      start
+      ( withCode
+          TX0002InvalidMacroPattern
+          ("macro `" <> Text.unpack name <> "` has no rules")
+      )
   let defSpan = SrcSpan start end
       draft = MacroDef{macroName = name, macroRules = [], macroSpan = defSpan}
   -- The template is checked with the macro itself in scope, so a rule may
   -- invoke its own macro (nested invocations stay unexpanded while checking).
   rules <-
     local (\env -> env{envMacros = Map.insert name draft (envMacros env)}) $
-      traverse (\(pattern', template, offset) -> MacroRule pattern' template offset <$> checkInstance defSpan pattern' template offset) rawRules
+      traverse
+        ( \(pattern', template, offset) ->
+            MacroRule pattern' template offset
+              <$> checkInstance defSpan pattern' template offset
+        )
+        rawRules
   pure draft{macroRules = rules}
   where
     ruleParser = do
@@ -429,11 +448,17 @@ macroParser = do
 -- metavariable symbolic, closed into a lambda for the checker.
 checkInstance :: SrcSpan -> [MacroToken] -> Text.Text -> Int -> Parser Expr
 checkInstance defSpan pattern' template offset = do
-  (text, leaves) <- either (failAt offset) pure (instantiateTemplate (symbolicBindings pattern') template)
+  (text, leaves) <-
+    either
+      (failAt offset)
+      pure
+      (instantiateTemplate (symbolicBindings pattern') template)
   env <- ask
   instance' <- subParse env{envCheckingTemplate = True} text
-  hygienic <- either (failAt offset) pure (hygienize "'def" (relocate defSpan instance'))
-  closeTemplate leaves <$> either (failAt offset) pure (substitute leaves hygienic)
+  hygienic <-
+    either (failAt offset) pure (hygienize "'def" (relocate defSpan instance'))
+  closeTemplate leaves
+    <$> either (failAt offset) pure (substitute leaves hygienic)
 
 -- | One pattern element.
 patternToken :: Parser MacroToken
@@ -459,8 +484,12 @@ patternToken =
       _ <- try (string "$(") <* sc
       items <- many patternToken
       _ <- symbol ")"
-      separator <- optional (try (lexeme (oneOf (",;" :: String)) <* lookAhead (oneOf ("*+?" :: String))))
-      kind <- lexeme ((ZeroOrMore <$ char '*') <|> (OneOrMore <$ char '+') <|> (ZeroOrOne <$ char '?'))
+      separator <-
+        optional
+          (try (lexeme (oneOf (",;" :: String)) <* lookAhead (oneOf ("*+?" :: String))))
+      kind <-
+        lexeme
+          ((ZeroOrMore <$ char '*') <|> (OneOrMore <$ char '+') <|> (ZeroOrOne <$ char '?'))
       pure (MRepeat items (Text.singleton <$> separator) kind)
     metavariable = do
       start <- getOffset
@@ -476,7 +505,16 @@ patternToken =
         "ident" -> pure FragIdent
         "type" -> pure FragType
         "string" -> pure FragString
-        other -> failAt start (withCode TX0002InvalidMacroPattern ("unknown fragment `" <> other <> "`: use expr, ident, type, or string (or `$x :: Type` for a typed expression)"))
+        other ->
+          failAt
+            start
+            ( withCode
+                TX0002InvalidMacroPattern
+                ( "unknown fragment `"
+                    <> other
+                    <> "`: use expr, ident, type, or string (or `$x :: Type` for a typed expression)"
+                )
+            )
 
 -- | A parenthesized template, captured as raw text (with its offset) so its
 -- repetitions can be expanded before it is parsed.
@@ -509,12 +547,17 @@ balancedText = concat <$> many piece
       pure (open : inner <> [close])
     quoted = do
       _ <- char '"'
-      body <- many ((\a b -> [a, b]) <$> char '\\' <*> anySingle <|> pure <$> satisfy (/= '"'))
+      body <-
+        many
+          ((\a b -> [a, b]) <$> char '\\' <*> anySingle <|> pure <$> satisfy (/= '"'))
       _ <- char '"'
       pure ('"' : concat body <> "\"")
     indented = do
       _ <- try (string "''")
-      body <- manyTill anySingle (try (string "''" <* notFollowedBy (oneOf ("'$\\" :: String))))
+      body <-
+        manyTill
+          anySingle
+          (try (string "''" <* notFollowedBy (oneOf ("'$\\" :: String))))
       pure ("''" <> body <> "''")
 
 -- | Parse a macro invocation `name!( ... )`, expanding it in place.
@@ -528,10 +571,13 @@ macroInvocation = do
   macros <- asks envMacros
   name <-
     try $ do
-      raw <- Text.pack <$> some (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))
+      raw <-
+        Text.pack <$> some (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))
       _ <- char '!'
       _ <- lookAhead (char '(')
-      if raw == "stringify" || Map.member raw macros then pure raw else fail "not a macro"
+      if raw == "stringify" || Map.member raw macros
+        then pure raw
+        else fail "not a macro"
   _ <- symbol "("
   if name == "stringify"
     then stringifyInvocation
@@ -543,7 +589,9 @@ macroInvocation = do
           _ <- symbol ")"
           pure (EVar "$nested")
         else case Map.lookup name macros of
-          Nothing -> fail (withCode TX0001NoMatchingRule ("unknown macro `" <> Text.unpack name <> "`"))
+          Nothing ->
+            fail
+              (withCode TX0001NoMatchingRule ("unknown macro `" <> Text.unpack name <> "`"))
           Just macro -> expandInvocation start macro
 
 stringifyInvocation :: Parser Expr
@@ -560,19 +608,43 @@ expandInvocation :: Int -> MacroDef -> Parser Expr
 expandInvocation start macro = do
   depth <- asks envExpansionDepth
   when (depth >= expansionLimit) $
-    fail (withCode TX0005ExpansionLimit ("macro `" <> Text.unpack (macroName macro) <> "` expanded more than " <> show expansionLimit <> " levels deep; is it recursive without a base case?"))
-  matched <- optional (choice [try ((,) rule <$> matchTokens (rulePattern rule) <* symbol ")") | rule <- macroRules macro])
+    fail
+      ( withCode
+          TX0005ExpansionLimit
+          ( "macro `"
+              <> Text.unpack (macroName macro)
+              <> "` expanded more than "
+              <> show expansionLimit
+              <> " levels deep; is it recursive without a base case?"
+          )
+      )
+  matched <-
+    optional
+      ( choice
+          [ try ((,) rule <$> matchTokens (rulePattern rule) <* symbol ")")
+          | rule <- macroRules macro
+          ]
+      )
   case matched of
     Nothing ->
-      fail (withCode TX0001NoMatchingRule ("no rule of macro `" <> Text.unpack (macroName macro) <> "` matches this invocation"))
+      fail
+        ( withCode
+            TX0001NoMatchingRule
+            ( "no rule of macro `"
+                <> Text.unpack (macroName macro)
+                <> "` matches this invocation"
+            )
+        )
     Just (rule, bindings) -> do
       end <- getOffset
       let invocationSpan = SrcSpan start end
           suffix = "'" <> Text.pack (show (depth + 1)) <> "_" <> Text.pack (show start)
-      (text, leaves) <- either fail pure (instantiateTemplate bindings (ruleTemplate rule))
+      (text, leaves) <-
+        either fail pure (instantiateTemplate bindings (ruleTemplate rule))
       env <- ask
       instance' <- subParse env{envExpansionDepth = depth + 1} text
-      hygienic <- either fail pure (hygienize suffix (relocate invocationSpan instance'))
+      hygienic <-
+        either fail pure (hygienize suffix (relocate invocationSpan instance'))
       expanded <- either fail pure (substitute leaves hygienic)
       pure (ELoc invocationSpan expanded)
 
@@ -587,7 +659,8 @@ subParse env text =
        in fail $
             if "[TX" `Text.isPrefixOf` Text.pack message
               then message
-              else withCode TX0004InvalidTemplate ("macro expansion does not parse: " <> message)
+              else
+                withCode TX0004InvalidTemplate ("macro expansion does not parse: " <> message)
 
 -- | Match pattern tokens against invocation input.
 matchTokens :: [MacroToken] -> Parser (Map Name Binding)
@@ -596,7 +669,13 @@ matchTokens items = Map.unions <$> traverse matchToken items
     matchToken = \case
       MLiteral literal
         | Text.all (\c -> isAlphaNum c || c `elem` ("_'" :: String)) literal ->
-            Map.empty <$ lexeme (try (string literal <* notFollowedBy (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))))
+            Map.empty
+              <$ lexeme
+                ( try
+                    ( string literal
+                        <* notFollowedBy (satisfy (\c -> isAlphaNum c || c `elem` ("_'-" :: String)))
+                    )
+                )
         | otherwise -> Map.empty <$ try (symbol literal)
       MVar name fragment -> Map.singleton name . Single <$> matchFragment fragment
       MGroup open inner close -> symbol open *> matchTokens inner <* symbol close
@@ -607,7 +686,14 @@ matchTokens items = Map.unions <$> traverse matchToken items
           ZeroOrOne -> maybeToList <$> optional element
           ZeroOrMore -> optional element >>= maybe (pure []) (\first -> (first :) <$> many next)
           OneOrMore -> element >>= \first -> (first :) <$> many next
-        pure (Map.fromList [(name, Repeated [binding | result <- results, Just binding <- [Map.lookup name result]]) | (name, _, _) <- tokenVars inner])
+        pure
+          ( Map.fromList
+              [ ( name,
+                  Repeated [binding | result <- results, Just binding <- [Map.lookup name result]]
+                )
+              | (name, _, _) <- tokenVars inner
+              ]
+          )
     matchFragment = \case
       FragExpr ty -> (`LExpr` ty) <$> expressionParser
       FragIdent -> LIdent <$> bindingIdentifier
@@ -643,14 +729,10 @@ pathExpr = lexeme $ try $ do
     [StrText whole] -> EPath (Text.unpack whole)
     _ -> EPathInterp parts
   where
-    pathSegment isFirst =
-      interpPart
-        <|> ( StrText . Text.pack
-                <$> ( if isFirst
-                        then (:) <$> satisfy segmentStart <*> many (satisfy pathChar)
-                        else some (satisfy pathChar <|> try (char '/' <* lookAhead (satisfy segmentStart <|> char '$')))
-                    )
-            )
+    pathSegment isFirst = interpPart <|> (StrText . Text.pack <$> segmentCharacters isFirst)
+    segmentCharacters True = (:) <$> satisfy segmentStart <*> many (satisfy pathChar)
+    segmentCharacters False = some (satisfy pathChar <|> pathSeparator)
+    pathSeparator = try (char '/' <* lookAhead (satisfy segmentStart <|> char '$'))
     pathChar c = c `elem` ("._-+" :: String) || isPathAlnum c
     segmentStart = pathChar
     isPathAlnum c = isAsciiLower c || isAsciiUpper c || isDigit c
@@ -672,7 +754,10 @@ doubleQuotedExpr =
 indentedExpr :: Parser Expr
 indentedExpr =
   mkStringExpr InterpIndented
-    <$> (string "''" *> many (interpPart <|> indentedEscape <|> indentedTextPart) <* string "''")
+    <$> ( string "''"
+            *> many (interpPart <|> indentedEscape <|> indentedTextPart)
+            <* string "''"
+        )
 
 -- | An `''\n`, `''\r`, or `''\t` escape, kept verbatim (see 'StrEscape').
 -- Any other `''\c` stands for the character itself and is read as text.
@@ -684,7 +769,9 @@ interpPart :: Parser StringPart
 interpPart = StrExpr <$> (try (string "${") *> sc *> expressionParser <* char '}')
 
 doubleTextPart :: Parser StringPart
-doubleTextPart = StrText . Text.concat <$> some ((try (string "$$") $> "$$") <|> (Text.singleton <$> doubleTextChar))
+doubleTextPart =
+  StrText . Text.concat
+    <$> some ((try (string "$$") $> "$$") <|> (Text.singleton <$> doubleTextChar))
 
 -- | A literal character inside a double-quoted string. Nix recognises `\n`,
 -- `\r`, and `\t`; a backslash before any other character yields that
@@ -714,14 +801,19 @@ indentedChunk =
     <|> (try (string "''${") $> "${")
     <|> (try (string "''$") $> "$")
     <|> (try (string "'''") $> "''")
-    <|> (Text.singleton <$> (try (string "''\\" <* notFollowedBy (oneOf ("nrt" :: String))) *> anySingle))
-    <|> (Text.singleton <$> (notFollowedBy (string "${") *> notFollowedBy (string "''") *> anySingle))
+    <|> ( Text.singleton
+            <$> (try (string "''\\" <* notFollowedBy (oneOf ("nrt" :: String))) *> anySingle)
+        )
+    <|> ( Text.singleton
+            <$> (notFollowedBy (string "${") *> notFollowedBy (string "''") *> anySingle)
+        )
 
 -- | Collapse parsed segments into a plain 'EString' when there is no
 -- interpolation; otherwise keep the interpolated representation.
 mkStringExpr :: InterpForm -> [StringPart] -> Expr
 mkStringExpr form parts
-  | all isText parts = EString (literalFor form (Text.concat [t | StrText t <- parts]))
+  | all isText parts =
+      EString (literalFor form (Text.concat [t | StrText t <- parts]))
   | otherwise = EInterp form parts
   where
     isText StrText{} = True
@@ -794,7 +886,12 @@ patternParser =
       name <- bindingIdentifier
       annotation <- optional (symbol "::" *> typeParser)
       fallback <- optional (symbol "?" *> expressionParser)
-      pure PatternField{patternFieldName = name, patternFieldType = annotation, patternFieldDefault = fallback}
+      pure
+        PatternField
+          { patternFieldName = name,
+            patternFieldType = annotation,
+            patternFieldDefault = fallback
+          }
     isRightItem = isJust . either (const Nothing) Just
 
 markCurrent :: Parser a -> Parser (Marked a)
@@ -804,7 +901,8 @@ markCurrent parser = Marked <$> directiveForCurrentLine <*> parser
 -- (e.g. `-` vs `->`, `/` vs `//`, `<` vs `<|`).
 operator :: Text.Text -> String -> Parser ()
 operator op forbiddenNext =
-  void (lexeme (try (string op <* notFollowedBy (satisfy (`elem` forbiddenNext)))))
+  void
+    (lexeme (try (string op <* notFollowedBy (satisfy (`elem` forbiddenNext)))))
 
 binary :: BinOp -> Expr -> Expr -> Expr
 binary op left right =

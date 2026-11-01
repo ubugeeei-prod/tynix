@@ -17,10 +17,17 @@ spec = do
   describe "tokenize" $ do
     it "splits interpolated strings into pieces around the antiquotation" $
       map (\t -> (tokKind t, tokText t)) (tokenize "\"a${b}c\"")
-        `shouldBe` [(KString, "\"a"), (KSymbol, "${"), (KIdent, "b"), (KSymbol, "}"), (KString, "c\"")]
+        `shouldBe` [ (KString, "\"a"),
+                     (KSymbol, "${"),
+                     (KIdent, "b"),
+                     (KSymbol, "}"),
+                     (KString, "c\"")
+                   ]
 
     it "recognises paths, search paths, comments, and keywords" $
-      map (\t -> (tokKind t, tokText t)) (tokenize "let p = ./a/b.nix; q = <nixpkgs>; in p # done")
+      map
+        (\t -> (tokKind t, tokText t))
+        (tokenize "let p = ./a/b.nix; q = <nixpkgs>; in p # done")
         `shouldBe` [ (KKeyword, "let"),
                      (KIdent, "p"),
                      (KSymbol, "="),
@@ -64,9 +71,14 @@ spec = do
 
     it "records owners so parameter types can come from the function signature" $ do
       let scan = scanDocument "let f :: Int -> Int -> Int; f = x: y: x; in f"
-          owners = [(binderName b, snd <$> binderOwner b) | b <- scanBinders scan, binderKind b == BindParam]
+          owners =
+            [ (binderName b, snd <$> binderOwner b)
+            | b <- scanBinders scan,
+              binderKind b == BindParam
+            ]
       sort owners `shouldBe` [("x", Just 0), ("y", Just 1)]
-      [binderAnnotation b | b <- scanBinders scan, binderName b == "f"] `shouldBe` [Just "Int -> Int -> Int"]
+      [binderAnnotation b | b <- scanBinders scan, binderName b == "f"]
+        `shouldBe` [Just "Int -> Int -> Int"]
 
     it "resolves references to the innermost binder and ignores field selections" $ do
       let content = "let x = 1; y = x: x.x; in y x"
@@ -80,7 +92,9 @@ spec = do
       sort (map binderName (unusedBinders scan)) `shouldBe` ["b", "unused"]
 
     it "does not treat type annotations or attr keys as references" $ do
-      let scan = scanDocument "let a = 1; t :: forall a. a -> a; t = v: v; r = { a = 2; }; in r.a + t 1"
+      let scan =
+            scanDocument
+              "let a = 1; t :: forall a. a -> a; t = v: v; r = { a = 2; }; in r.a + t 1"
       map binderName (unusedBinders scan) `shouldBe` ["a"]
 
     it "counts inherit inside an attrset as a use of the outer binding" $ do
@@ -102,13 +116,17 @@ spec = do
       map binderName (bindersInScopeAt scan 17) `shouldBe` ["a", "b"]
 
     it "collects documentation comments above a declaration" $ do
-      let scan = scanDocument "let\n  # Adds one.\n  # @tynix-ignore\n  inc = x: x + 1;\nin inc"
+      let scan =
+            scanDocument "let\n  # Adds one.\n  # @tynix-ignore\n  inc = x: x + 1;\nin inc"
       docCommentAtLine scan 3 `shouldBe` Just "Adds one."
 
 refsTo :: Scan -> [(Text, Int)]
 refsTo scan =
   mapMaybe
     ( \b ->
-        Just (binderName b <> "@" <> Text.pack (show (binderNameStart b)), length (binderReferences scan b))
+        Just
+          ( binderName b <> "@" <> Text.pack (show (binderNameStart b)),
+            length (binderReferences scan b)
+          )
     )
     (scanBinders scan)

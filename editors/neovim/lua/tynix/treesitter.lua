@@ -75,7 +75,12 @@ local function add_language(opts)
     end
     return true
   end
-  local ok, err = pcall(vim.treesitter.require_language, M.lang, opts and opts.path or nil, opts == nil)
+  local ok, err = pcall(
+    vim.treesitter.require_language,
+    M.lang,
+    opts and opts.path or nil,
+    opts == nil
+  )
   return ok, ok and nil or tostring(err)
 end
 

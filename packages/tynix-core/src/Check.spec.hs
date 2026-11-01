@@ -47,7 +47,8 @@ spec = do
     it "is idempotent" $
       property $ \(PathSegments segments) ->
         let path = joinSegments segments
-         in collapseParentSegments (collapseParentSegments path) === collapseParentSegments path
+         in collapseParentSegments (collapseParentSegments path)
+              === collapseParentSegments path
 
     it "leaves no resolvable parent segment in an absolute result" $
       property $ \(PathSegments segments) ->
@@ -67,10 +68,12 @@ spec = do
       resolvePath "src/app/main.tynix" "./lib.nix" `shouldBe` "src/app/lib.nix"
 
     it "walks out of the importing directory for parent-relative imports" $
-      resolvePath "src/app/main.tynix" "../shared/lib.nix" `shouldBe` "src/shared/lib.nix"
+      resolvePath "src/app/main.tynix" "../shared/lib.nix"
+        `shouldBe` "src/shared/lib.nix"
 
     it "normalizes an absolute import without consulting the importer" $
-      resolvePath "src/app/main.tynix" "/opt/pkgs/./lib.nix" `shouldBe` "/opt/pkgs/lib.nix"
+      resolvePath "src/app/main.tynix" "/opt/pkgs/./lib.nix"
+        `shouldBe` "/opt/pkgs/lib.nix"
 
     it "agrees for a file and the same file reached through a parent segment" $
       resolvePath "src/app/main.tynix" "./lib.nix"
@@ -101,23 +104,34 @@ spec = do
       let inner = SrcSpan 2 9
           expression = ELoc (SrcSpan 0 10) (ELoc inner (EVar "missing"))
           program = Program [] [] (Just (Marked Nothing expression)) []
-      fmap checkErrorSpan (either Just (const Nothing) (checkProgramDetailed defaultContext program))
+      fmap
+        checkErrorSpan
+        (either Just (const Nothing) (checkProgramDetailed defaultContext program))
         `shouldBe` Just (Just inner)
 
   describe "checkProgram" $ do
     it "returns no root for a declaration-only program" $ do
-      result <- checkSource (source ["type Id a = a;", "declare \"./lib.nix\" { default :: Id Int; };"])
+      result <-
+        checkSource
+          (source ["type Id a = a;", "declare \"./lib.nix\" { default :: Id Int; };"])
       resultRoot result `shouldBe` Nothing
       resultBindings result `shouldBe` Map.empty
 
     it "reports the final type of every let binding" $ do
-      result <- checkSource (source ["let", "  name = \"tynix\";", "  count = 1 + 1;", "in count"])
-      fmap renderScheme (Map.lookup "name" (resultBindings result)) `shouldBe` Just "\"tynix\""
-      fmap renderScheme (Map.lookup "count" (resultBindings result)) `shouldBe` Just "Int"
+      result <-
+        checkSource
+          (source ["let", "  name = \"tynix\";", "  count = 1 + 1;", "in count"])
+      fmap renderScheme (Map.lookup "name" (resultBindings result))
+        `shouldBe` Just "\"tynix\""
+      fmap renderScheme (Map.lookup "count" (resultBindings result))
+        `shouldBe` Just "Int"
 
     it "keeps a declared signature rather than the inferred body type" $ do
-      result <- checkSource (source ["let", "  id :: forall a. a -> a;", "  id = x: x;", "in id"])
-      fmap renderScheme (Map.lookup "id" (resultBindings result)) `shouldBe` Just "forall a. a -> a"
+      result <-
+        checkSource
+          (source ["let", "  id :: forall a. a -> a;", "  id = x: x;", "in id"])
+      fmap renderScheme (Map.lookup "id" (resultBindings result))
+        `shouldBe` Just "forall a. a -> a"
 
     it "leaves bindings empty when the root is not a let expression" $ do
       result <- checkSource "{ value = 1; }"
@@ -133,8 +147,14 @@ spec = do
         `shouldSatisfy` either (Text.isInfixOf "[TC0001]" . Text.pack) (const False)
 
     it "reads the builtins scheme out of the ambient world" $ do
-      let ambient = Map.fromList [("builtins", Scheme [] (TRecord (Map.fromList [("length", TFun Many (tList tInt) tInt)])))]
-      result <- checkSourceWith defaultContext{checkAmbient = ambient} "builtins.length"
+      let ambient =
+            Map.fromList
+              [ ( "builtins",
+                  Scheme [] (TRecord (Map.fromList [("length", TFun Many (tList tInt) tInt)]))
+                )
+              ]
+      result <-
+        checkSourceWith defaultContext{checkAmbient = ambient} "builtins.length"
       fmap renderScheme (resultRoot result) `shouldBe` Just "List Int -> Int"
 
 defaultContext :: CheckContext
@@ -149,7 +169,8 @@ defaultContext =
 
 checkEither :: CheckContext -> Text -> Either String CheckResult
 checkEither ctx input = do
-  program <- either (Left . Text.unpack) Right (parseProgram (checkFile ctx) input)
+  program <-
+    either (Left . Text.unpack) Right (parseProgram (checkFile ctx) input)
   checkProgram ctx program
 
 checkSourceWith :: CheckContext -> Text -> IO CheckResult
@@ -170,7 +191,8 @@ newtype PathSegments = PathSegments [String]
   deriving (Show)
 
 instance Arbitrary PathSegments where
-  arbitrary = PathSegments <$> resize 8 (listOf (elements ["a", "b", "c", ".", "..", "dir"]))
+  arbitrary =
+    PathSegments <$> resize 8 (listOf (elements ["a", "b", "c", ".", "..", "dir"]))
   shrink (PathSegments segments) = PathSegments <$> shrinkList (const []) segments
 
 joinSegments :: [String] -> FilePath

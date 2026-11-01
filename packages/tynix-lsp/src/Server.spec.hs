@@ -14,7 +14,16 @@ import Data.Text (Text)
 import Driver (Analysis (..))
 import Server
 import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (Handle, SeekMode (AbsoluteSeek), hClose, hFlush, hSeek, hSetBinaryMode, hWaitForInput, openTempFile)
+import System.IO
+  ( Handle,
+    SeekMode (AbsoluteSeek),
+    hClose,
+    hFlush,
+    hSeek,
+    hSetBinaryMode,
+    hWaitForInput,
+    openTempFile,
+  )
 import System.Posix.IO (createPipe, fdToHandle)
 import Test.Hspec
 import Type
@@ -49,14 +58,21 @@ spec = do
           "semanticTokensProvider",
           "textDocumentSync"
         ]
-      (provider "completionProvider" >>= field "resolveProvider") `shouldBe` Just (Bool True)
-      (provider "completionProvider" >>= field "triggerCharacters") `shouldBe` Just (toJSON ["." :: String, "/"])
-      (provider "renameProvider" >>= field "prepareProvider") `shouldBe` Just (Bool True)
-      (provider "semanticTokensProvider" >>= field "range") `shouldBe` Just (Bool True)
+      (provider "completionProvider" >>= field "resolveProvider")
+        `shouldBe` Just (Bool True)
+      (provider "completionProvider" >>= field "triggerCharacters")
+        `shouldBe` Just (toJSON ["." :: String, "/"])
+      (provider "renameProvider" >>= field "prepareProvider")
+        `shouldBe` Just (Bool True)
+      (provider "semanticTokensProvider" >>= field "range")
+        `shouldBe` Just (Bool True)
       provider "diagnosticProvider" `shouldBe` Nothing
 
     it "keeps the original semantic token legend indices and appends new types" $ do
-      let legend = field "capabilities" clientCapabilities >>= field "semanticTokensProvider" >>= field "legend"
+      let legend =
+            field "capabilities" clientCapabilities
+              >>= field "semanticTokensProvider"
+              >>= field "legend"
       (legend >>= field "tokenTypes")
         `shouldBe` Just
           ( toJSON
@@ -87,7 +103,12 @@ spec = do
       withTempHandle $ \handle -> do
         respondError
           handle
-          (object ["jsonrpc" .= ("2.0" :: String), "id" .= (7 :: Int), "method" .= ("textDocument/unknown" :: String)])
+          ( object
+              [ "jsonrpc" .= ("2.0" :: String),
+                "id" .= (7 :: Int),
+                "method" .= ("textDocument/unknown" :: String)
+              ]
+          )
           (-32601)
           "method not found: textDocument/unknown"
         hSeek handle AbsoluteSeek 0
@@ -98,7 +119,11 @@ spec = do
             ( object
                 [ "jsonrpc" .= ("2.0" :: String),
                   "id" .= (7 :: Int),
-                  "error" .= object ["code" .= (-32601 :: Int), "message" .= ("method not found: textDocument/unknown" :: String)]
+                  "error"
+                    .= object
+                      [ "code" .= (-32601 :: Int),
+                        "message" .= ("method not found: textDocument/unknown" :: String)
+                      ]
                 ]
             )
 
@@ -106,7 +131,9 @@ spec = do
       withTempHandle $ \handle -> do
         respondError
           handle
-          (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("$/cancelRequest" :: String)])
+          ( object
+              ["jsonrpc" .= ("2.0" :: String), "method" .= ("$/cancelRequest" :: String)]
+          )
           (-32601)
           "method not found"
         hSeek handle AbsoluteSeek 0
@@ -115,7 +142,10 @@ spec = do
 
   describe "contentLengthFromHeaders" $ do
     it "finds content length regardless of header order or casing" $
-      contentLengthFromHeaders ["Content-Type: application/vscode-jsonrpc; charset=utf-8", "content-length: 42"]
+      contentLengthFromHeaders
+        [ "Content-Type: application/vscode-jsonrpc; charset=utf-8",
+          "content-length: 42"
+        ]
         `shouldBe` Just 42
 
     it "rejects missing or malformed lengths" $ do
@@ -142,17 +172,31 @@ spec = do
 
   describe "documentPath" $
     it "extracts the path from textDocument params" $
-      documentPath (Just (object ["textDocument" .= object ["uri" .= ("file:///tmp/main.tynix" :: String)]]))
+      documentPath
+        ( Just
+            ( object
+                ["textDocument" .= object ["uri" .= ("file:///tmp/main.tynix" :: String)]]
+            )
+        )
         `shouldBe` Just "/tmp/main.tynix"
 
   describe "documentPath localhost" $
     it "normalizes localhost authorities in textDocument params" $
-      documentPath (Just (object ["textDocument" .= object ["uri" .= ("file://localhost/tmp/main.tynix" :: String)]]))
+      documentPath
+        ( Just
+            ( object
+                [ "textDocument"
+                    .= object ["uri" .= ("file://localhost/tmp/main.tynix" :: String)]
+                ]
+            )
+        )
         `shouldBe` Just "/tmp/main.tynix"
 
   describe "applyContentChanges" $ do
     it "replaces the whole document when a change omits range information" $
-      applyContentChanges "before" (Just (object ["contentChanges" .= [object ["text" .= ("after" :: String)]]]))
+      applyContentChanges
+        "before"
+        (Just (object ["contentChanges" .= [object ["text" .= ("after" :: String)]]]))
         `shouldBe` Right "after"
 
     it "applies incremental edits in order" $
@@ -243,32 +287,52 @@ spec = do
         )
         `shouldBe` Left "content change character is out of bounds"
 
-  describe "wordAt" $
-    it "extracts identifiers around the cursor including punctuation used by nix names" $ do
+  describe "wordAt"
+    $ it
+      "extracts identifiers around the cursor including punctuation used by nix names"
+    $ do
       wordAt 0 4 "lib.attr-set" `shouldBe` "lib.attr-set"
       wordAt 1 0 "x\ny" `shouldBe` "y"
       wordAt 0 4 "\x1f600 b more" `shouldBe` "b"
 
   describe "publishDiagnostics" $ do
-    it "emits an empty diagnostics list on success and an error diagnostic on failure" $ do
-      publishDiagnostics "/tmp/main.tynix" (Right successAnalysis)
-        `shouldBe` object ["uri" .= ("file:///tmp/main.tynix" :: String), "diagnostics" .= ([] :: [Value])]
-      case publishDiagnostics "/tmp/main.tynix" (Left "boom") of
-        Object obj ->
-          KeyMap.lookup "diagnostics" obj `shouldBe` Just (toJSON [diag "boom"])
-        other -> expectationFailure ("expected object, got " <> show other)
+    it
+      "emits an empty diagnostics list on success and an error diagnostic on failure"
+      $ do
+        publishDiagnostics "/tmp/main.tynix" (Right successAnalysis)
+          `shouldBe` object
+            [ "uri" .= ("file:///tmp/main.tynix" :: String),
+              "diagnostics" .= ([] :: [Value])
+            ]
+        case publishDiagnostics "/tmp/main.tynix" (Left "boom") of
+          Object obj ->
+            KeyMap.lookup "diagnostics" obj `shouldBe` Just (toJSON [diag "boom"])
+          other -> expectationFailure ("expected object, got " <> show other)
 
     it "builds an explicit clear-diagnostics notification body" $
       clearDiagnostics "/tmp/main.tynix"
-        `shouldBe` object ["uri" .= ("file:///tmp/main.tynix" :: String), "diagnostics" .= ([] :: [Value])]
+        `shouldBe` object
+          [ "uri" .= ("file:///tmp/main.tynix" :: String),
+            "diagnostics" .= ([] :: [Value])
+          ]
 
   describe "publishDiagnosticsWithContent" $ do
     it "highlights unbound names using the token span in the current buffer" $
-      diagnosticSpan (publishDiagnosticsWithContent "/tmp/main.tynix" "missing" (Left "unbound name: \"missing\""))
+      diagnosticSpan
+        ( publishDiagnosticsWithContent
+            "/tmp/main.tynix"
+            "missing"
+            (Left "unbound name: \"missing\"")
+        )
         `shouldBe` Just (0, 0, 7)
 
     it "reports token ranges using UTF-16 columns after non-BMP text" $
-      diagnosticSpan (publishDiagnosticsWithContent "/tmp/main.tynix" "\x1f600 missing" (Left "unbound name: \"missing\""))
+      diagnosticSpan
+        ( publishDiagnosticsWithContent
+            "/tmp/main.tynix"
+            "\x1f600 missing"
+            (Left "unbound name: \"missing\"")
+        )
         `shouldBe` Just (0, 3, 10)
 
     it "uses parser coordinates when a parse error includes line and column data" $
@@ -289,7 +353,13 @@ spec = do
   describe "hoverResult" $
     it "prefers the hovered symbol type and falls back to the root type" $ do
       hoverResult (Right successAnalysis) "box" 0 1
-        `shouldBe` object ["contents" .= object ["kind" .= ("markdown" :: String), "value" .= ("```tynix\nString\n```" :: String)]]
+        `shouldBe` object
+          [ "contents"
+              .= object
+                [ "kind" .= ("markdown" :: String),
+                  "value" .= ("```tynix\nString\n```" :: String)
+                ]
+          ]
       hoverResult (Right builtinsAnalysis) "builtins.map" 0 2
         `shouldBe` object
           [ "contents"
@@ -300,11 +370,27 @@ spec = do
                 ]
           ]
       hoverResult (Right builtinsAnalysis) "builtins.map" 0 10
-        `shouldBe` object ["contents" .= object ["kind" .= ("markdown" :: String), "value" .= ("```tynix\nInt -> String\n```" :: String)]]
+        `shouldBe` object
+          [ "contents"
+              .= object
+                [ "kind" .= ("markdown" :: String),
+                  "value" .= ("```tynix\nInt -> String\n```" :: String)
+                ]
+          ]
       hoverResult (Right rootOnlyAnalysis) "?" 0 0
-        `shouldBe` object ["contents" .= object ["kind" .= ("markdown" :: String), "value" .= ("```tynix\nInt\n```" :: String)]]
+        `shouldBe` object
+          [ "contents"
+              .= object
+                ["kind" .= ("markdown" :: String), "value" .= ("```tynix\nInt\n```" :: String)]
+          ]
       hoverResult (Left "type mismatch") "box" 0 0
-        `shouldBe` object ["contents" .= object ["kind" .= ("markdown" :: String), "value" .= ("```tynix\ntype mismatch\n```" :: String)]]
+        `shouldBe` object
+          [ "contents"
+              .= object
+                [ "kind" .= ("markdown" :: String),
+                  "value" .= ("```tynix\ntype mismatch\n```" :: String)
+                ]
+          ]
 
   describe "completionResult" $ do
     it "offers top-level symbols, builtins, and protocol-safe metadata" $
@@ -316,7 +402,8 @@ spec = do
         `shouldBe` ["inc"]
 
     it "interprets completion positions as UTF-16 character offsets" $
-      completionLabels (completionResult (Right completionAnalysis) "\x1f600 b more" 0 4)
+      completionLabels
+        (completionResult (Right completionAnalysis) "\x1f600 b more" 0 4)
         `shouldBe` ["box", "builtins"]
 
     it "offers record fields after a dotted access and filters by prefix" $ do
@@ -328,16 +415,22 @@ spec = do
   describe "framing" $ do
     it "writes a Content-Length header followed by a JSON body" $
       withTempHandle $ \handle -> do
-        send handle (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
+        send
+          handle
+          (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
         hSeek handle AbsoluteSeek 0
         payload <- BS.hGetContents handle
         let body = snd (BS.breakSubstring "\r\n\r\n" payload)
         "Content-Length: " `BS.isPrefixOf` payload `shouldBe` True
-        decodeStrict' (BS.drop 4 body) `shouldBe` Just (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
+        decodeStrict' (BS.drop 4 body)
+          `shouldBe` Just
+            (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
 
     it "flushes framed messages so stdio clients can read them immediately" $
       withPipeHandles $ \readHandle writeHandle -> do
-        send writeHandle (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
+        send
+          writeHandle
+          (object ["jsonrpc" .= ("2.0" :: String), "method" .= ("initialized" :: String)])
         hWaitForInput readHandle 100 `shouldReturn` True
         payload <- BS.hGetSome readHandle 4096
         "Content-Length: " `BS.isPrefixOf` payload `shouldBe` True
@@ -448,7 +541,11 @@ completionAnalysis =
                         [ ( "map",
                             TForall
                               ["a", "b"]
-                              (TFun Many (TFun Many (TVar "a") (TVar "b")) (TFun Many (tList (TVar "a")) (tList (TVar "b"))))
+                              ( TFun
+                                  Many
+                                  (TFun Many (TVar "a") (TVar "b"))
+                                  (TFun Many (tList (TVar "a")) (tList (TVar "b")))
+                              )
                           )
                         ]
                     )

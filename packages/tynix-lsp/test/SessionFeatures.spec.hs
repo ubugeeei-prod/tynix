@@ -20,7 +20,13 @@ import Session
 import SessionScan (scanDocument)
 import SessionSemanticTokens (semanticTokensFor)
 import SessionTypes (SemanticToken (..))
-import System.Directory (createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeFile, removePathForcibly)
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    getTemporaryDirectory,
+    removeFile,
+    removePathForcibly,
+  )
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import Test.Hspec
@@ -31,35 +37,71 @@ main = hspec spec
 spec :: Spec
 spec = do
   describe "completion" $ do
-    it "lists record fields with their types after a dot" $
-      withDoc (Text.unlines ["let", "  pkg :: { name :: String; version :: String; };", "  pkg = { name = \"a\"; version = \"1\"; };", "in pkg.name"]) $ \run -> do
+    it "lists record fields with their types after a dot"
+      $ withDoc
+        ( Text.unlines
+            [ "let",
+              "  pkg :: { name :: String; version :: String; };",
+              "  pkg = { name = \"a\"; version = \"1\"; };",
+              "in pkg.name"
+            ]
+        )
+      $ \run -> do
         items <- run completionDocument (at 3 7)
-        map (\i -> (label i, detail i)) (completionItems items) `shouldBe` [("name", Just "String"), ("version", Just "String")]
+        map (\i -> (label i, detail i)) (completionItems items)
+          `shouldBe` [("name", Just "String"), ("version", Just "String")]
 
-    it "types lambda parameters from the enclosing function signature, even while the buffer is broken" $
-      withDoc (Text.unlines ["let", "  f :: { a :: Int; b :: String; } -> Int;", "  f = r: r.", "in f"]) $ \run -> do
+    it
+      "types lambda parameters from the enclosing function signature, even while the buffer is broken"
+      $ withDoc
+        ( Text.unlines
+            ["let", "  f :: { a :: Int; b :: String; } -> Int;", "  f = r: r.", "in f"]
+        )
+      $ \run -> do
         items <- run completionDocument (at 2 11)
         map label (completionItems items) `shouldBe` ["a", "b"]
 
-    it "types destructured pattern fields from the signature" $
-      withDoc (Text.unlines ["let", "  f :: { cfg :: { port :: Int; }; } -> Int;", "  f = { cfg }: cfg.", "in f"]) $ \run -> do
+    it "types destructured pattern fields from the signature"
+      $ withDoc
+        ( Text.unlines
+            [ "let",
+              "  f :: { cfg :: { port :: Int; }; } -> Int;",
+              "  f = { cfg }: cfg.",
+              "in f"
+            ]
+        )
+      $ \run -> do
         items <- run completionDocument (at 2 19)
         map label (completionItems items) `shouldBe` ["port"]
 
-    it "offers the expected record's missing fields inside an argument attrset" $
-      withDoc (Text.unlines ["let", "  mk :: { name :: String; version :: String; } -> String;", "  mk = a: a.name;", "in mk { name = \"x\"; }"]) $ \run -> do
+    it "offers the expected record's missing fields inside an argument attrset"
+      $ withDoc
+        ( Text.unlines
+            [ "let",
+              "  mk :: { name :: String; version :: String; } -> String;",
+              "  mk = a: a.name;",
+              "in mk { name = \"x\"; }"
+            ]
+        )
+      $ \run -> do
         items <- run completionDocument (at 3 19)
         let fields = filter ((== Just 10) . kind) (completionItems items)
         map label fields `shouldBe` ["version"]
         map insertText fields `shouldBe` [Just "version = $1;"]
 
-    it "completes type names, aliases, and type parameters in type positions" $
-      withDoc (Text.unlines ["type Box = { v :: Int; };", "let", "  x :: B", "  x = 1;", "in x"]) $ \run -> do
+    it "completes type names, aliases, and type parameters in type positions"
+      $ withDoc
+        ( Text.unlines
+            ["type Box = { v :: Int; };", "let", "  x :: B", "  x = 1;", "in x"]
+        )
+      $ \run -> do
         items <- run completionDocument (at 2 8)
         map label (completionItems items) `shouldSatisfy` \ls -> "Box" `elem` ls && "Bool" `elem` ls && "let" `notElem` ls
 
-    it "lists names in scope innermost first, plus keywords and snippets" $
-      withDoc (Text.unlines ["let", "  outer = 1;", "  f = inner: [ inner  ];", "in f outer"]) $ \run -> do
+    it "lists names in scope innermost first, plus keywords and snippets"
+      $ withDoc
+        (Text.unlines ["let", "  outer = 1;", "  f = inner: [ inner  ];", "in f outer"])
+      $ \run -> do
         items <- run completionDocument (at 2 21)
         let labels = map label (completionItems items)
         take 3 labels `shouldBe` ["inner", "outer", "f"]
@@ -70,84 +112,148 @@ spec = do
         items <- run completionDocument (at 3 5)
         map label (completionItems items) `shouldSatisfy` notElem "inner"
 
-    it "completes directory entries inside path literals" $
-      withTree [("main.tynix", "import ./sub/"), ("sub/a.nix", "1"), ("sub/nested/b.nix", "1")] $ \root -> do
+    it "completes directory entries inside path literals"
+      $ withTree
+        [("main.tynix", "import ./sub/"), ("sub/a.nix", "1"), ("sub/nested/b.nix", "1")]
+      $ \root -> do
         let file = root </> "main.tynix"
-        items <- completionDocument readFileStub analyzeText mempty (positionMessage file (0, 13))
+        items <-
+          completionDocument
+            readFileStub
+            analyzeText
+            mempty
+            (positionMessage file (0, 13))
         map label (completionItems items) `shouldBe` ["nested/", "a.nix"]
 
     it "attaches declaration comments as documentation and supports resolve"
       $ withTree
-        [ ("builtins.d.tynix", Text.unlines ["declare \"builtins\" {", "  # Number of list elements.", "  length :: List Int -> Int;", "};"]),
+        [ ( "builtins.d.tynix",
+            Text.unlines
+              [ "declare \"builtins\" {",
+                "  # Number of list elements.",
+                "  length :: List Int -> Int;",
+                "};"
+              ]
+          ),
           ("main.tynix", "builtins.length")
         ]
       $ \root -> do
         let file = root </> "main.tynix"
-        items <- completionDocument readFileStub analyzeText mempty (positionMessage file (0, 9))
+        items <-
+          completionDocument readFileStub analyzeText mempty (positionMessage file (0, 9))
         case filter ((== "length") . label) (completionItems items) of
           [item] -> do
             documentation item `shouldBe` Just "Number of list elements."
             let stripped = case item of
                   Object o -> Object (KeyMap.delete "documentation" o)
                   other -> other
-            resolved <- completionResolveDocument readFileStub analyzeText mempty (object ["params" .= stripped])
+            resolved <-
+              completionResolveDocument
+                readFileStub
+                analyzeText
+                mempty
+                (object ["params" .= stripped])
             documentation resolved `shouldBe` Just "Number of list elements."
           other -> expectationFailure ("expected one length item, got " <> show (length other))
 
   describe "hover" $ do
-    it "shows parameter types and documentation comments" $
-      withDoc (Text.unlines ["let", "  # Greets someone.", "  greet :: String -> String;", "  greet = who: who;", "in greet \"x\""]) $ \run -> do
+    it "shows parameter types and documentation comments"
+      $ withDoc
+        ( Text.unlines
+            [ "let",
+              "  # Greets someone.",
+              "  greet :: String -> String;",
+              "  greet = who: who;",
+              "in greet \"x\""
+            ]
+        )
+      $ \run -> do
         paramHover <- run hoverDocument (at 3 11)
         hoverValue paramHover `shouldBe` "```tynix\n(parameter) who :: String\n```"
         fnHover <- run hoverDocument (at 4 4)
-        hoverValue fnHover `shouldBe` "```tynix\ngreet :: String -> String\n```\n\n---\n\nGreets someone."
+        hoverValue fnHover
+          `shouldBe` "```tynix\ngreet :: String -> String\n```\n\n---\n\nGreets someone."
 
-    it "explains keywords and type aliases" $
-      withDoc (Text.unlines ["type Pair = { a :: Int; };", "let x :: Pair; x = { a = 1; }; in x"]) $ \run -> do
+    it "explains keywords and type aliases"
+      $ withDoc
+        ( Text.unlines
+            ["type Pair = { a :: Int; };", "let x :: Pair; x = { a = 1; }; in x"]
+        )
+      $ \run -> do
         kw <- run hoverDocument (at 1 1)
         hoverValue kw `shouldSatisfy` ("Local bindings" `Text.isInfixOf`)
         alias <- run hoverDocument (at 1 10)
-        hoverValue alias `shouldSatisfy` ("type Pair = " `Text.isPrefixOf`) . Text.drop (Text.length "```tynix\n")
+        hoverValue alias
+          `shouldSatisfy` ("type Pair = " `Text.isPrefixOf`) . Text.drop (Text.length "```tynix\n")
 
-  describe "signature help" $
-    it "tracks the active parameter of a curried call" $
-      withDoc (Text.unlines ["let", "  add :: Int -> Int -> Int;", "  add = a: b: a;", "in add 1 "]) $ \run -> do
-        help <- run signatureHelpDocument (at 3 9)
-        field' "activeParameter" help `shouldBe` Just (Number 1)
-        (field' "signatures" help >>= firstOf >>= field' "label") `shouldBe` Just (String "add :: Int -> Int -> Int")
+  describe "signature help"
+    $ it "tracks the active parameter of a curried call"
+    $ withDoc
+      ( Text.unlines
+          ["let", "  add :: Int -> Int -> Int;", "  add = a: b: a;", "in add 1 "]
+      )
+    $ \run -> do
+      help <- run signatureHelpDocument (at 3 9)
+      field' "activeParameter" help `shouldBe` Just (Number 1)
+      (field' "signatures" help >>= firstOf >>= field' "label")
+        `shouldBe` Just (String "add :: Int -> Int -> Int")
 
   describe "diagnostics" $ do
-    it "reports unbound names with a span, code link, suggestion, and related declaration (published)" $
-      withDiagnostics (Text.unlines ["let", "  greet = x: x;", "in gret 1"]) $ \diags -> do
+    it
+      "reports unbound names with a span, code link, suggestion, and related declaration (published)"
+      $ withDiagnostics (Text.unlines ["let", "  greet = x: x;", "in gret 1"])
+      $ \diags -> do
         let errors = filter ((== Just (String "TC0001")) . field' "code") diags
         case errors of
           [d] -> do
             rangeOf d `shouldBe` Just (2, 3, 2, 7)
-            (field' "codeDescription" d >>= field' "href") `shouldBe` Just (String "https://tynix.dev/reference/diagnostics#tc0001")
-            field' "message" d `shouldBe` Just (String "unbound name: `gret` Did you mean `greet`?")
-            (field' "relatedInformation" d >>= firstOf >>= field' "location" >>= rangeOf) `shouldBe` Just (1, 2, 1, 7)
+            (field' "codeDescription" d >>= field' "href")
+              `shouldBe` Just (String "https://tynix.dev/reference/diagnostics#tc0001")
+            field' "message" d
+              `shouldBe` Just (String "unbound name: `gret` Did you mean `greet`?")
+            (field' "relatedInformation" d >>= firstOf >>= field' "location" >>= rangeOf)
+              `shouldBe` Just (1, 2, 1, 7)
           other -> expectationFailure ("expected one TC0001, got " <> show other)
 
-    it "points missing fields at the selected field" $
-      withDiagnostics (Text.unlines ["let", "  box = { alpha = 1; };", "in box.alpah"]) $ \diags -> do
+    it "points missing fields at the selected field"
+      $ withDiagnostics
+        (Text.unlines ["let", "  box = { alpha = 1; };", "in box.alpah"])
+      $ \diags -> do
         let errors = filter ((== Just (String "TC0009")) . field' "code") diags
         map rangeOf errors `shouldBe` [Just (2, 7, 2, 12)]
 
-    it "localises location-less type errors to the offending binding value" $
-      withDiagnostics (Text.unlines ["let", "  greet :: String -> String;", "  greet = who: who;", "in {", "  ok = greet \"x\";", "  bad = greet 1;", "}"]) $ \diags -> do
+    it "localises location-less type errors to the offending binding value"
+      $ withDiagnostics
+        ( Text.unlines
+            [ "let",
+              "  greet :: String -> String;",
+              "  greet = who: who;",
+              "in {",
+              "  ok = greet \"x\";",
+              "  bad = greet 1;",
+              "}"
+            ]
+        )
+      $ \diags -> do
         let errors = filter ((== Just (Number 1)) . field' "severity") diags
         -- The checker points call mismatches at the offending argument.
         map rangeOf errors `shouldBe` [Just (5, 14, 5, 15)]
 
-    it "adds unused-binding hints tagged as unnecessary" $
-      withDiagnostics (Text.unlines ["let", "  used = 1;", "  spare = 2;", "in { f = { a, b }: a; v = used; }"]) $ \diags -> do
+    it "adds unused-binding hints tagged as unnecessary"
+      $ withDiagnostics
+        ( Text.unlines
+            ["let", "  used = 1;", "  spare = 2;", "in { f = { a, b }: a; v = used; }"]
+        )
+      $ \diags -> do
         let hints = filter ((== Just (String "TL0001")) . field' "code") diags
         map rangeOf hints `shouldBe` [Just (2, 2, 2, 7), Just (3, 14, 3, 15)]
         map (field' "tags") hints `shouldBe` replicate 2 (Just (toJSONList [1]))
         map (field' "severity") hints `shouldBe` replicate 2 (Just (Number 4))
 
-    it "flags uses of declarations documented as deprecated" $
-      withDiagnostics (Text.unlines ["let", "  # @deprecated use next instead", "  old = 1;", "in old"]) $ \diags -> do
+    it "flags uses of declarations documented as deprecated"
+      $ withDiagnostics
+        (Text.unlines ["let", "  # @deprecated use next instead", "  old = 1;", "in old"])
+      $ \diags -> do
         let hints = filter ((== Just (String "TL0002")) . field' "code") diags
         map rangeOf hints `shouldBe` [Just (3, 3, 3, 6)]
         map (field' "tags") hints `shouldBe` [Just (toJSONList [2])]
@@ -156,20 +262,41 @@ spec = do
       withDiagnostics (Text.unlines ["let", "  x = ;", "in x"]) $ \diags -> do
         let errors = filter ((== Just (String "TP0004")) . field' "code") diags
         map rangeOf errors `shouldBe` [Just (1, 6, 1, 7)]
-        map (fmap (Text.isInfixOf "|") . (field' "message" >=> asText)) errors `shouldBe` [Just False]
+        map (fmap (Text.isInfixOf "|") . (field' "message" >=> asText)) errors
+          `shouldBe` [Just False]
 
   describe "code actions" $ do
-    it "suggests close field names and adding the missing field" $
-      withDoc (Text.unlines ["let", "  box = {", "    alpha = 1;", "  };", "in box.alpah"]) $ \run -> do
-        let diagnostic = object ["message" .= ("missing field `alpah` on { alpha :: Int; }" :: Text), "code" .= ("TC0009" :: Text), "range" .= rangeJson 4 7 4 12]
+    it "suggests close field names and adding the missing field"
+      $ withDoc
+        (Text.unlines ["let", "  box = {", "    alpha = 1;", "  };", "in box.alpah"])
+      $ \run -> do
+        let diagnostic =
+              object
+                [ "message" .= ("missing field `alpah` on { alpha :: Int; }" :: Text),
+                  "code" .= ("TC0009" :: Text),
+                  "range" .= rangeJson 4 7 4 12
+                ]
         actions <- run codeActionsDocument (codeActionParams (4, 7) [diagnostic])
-        titles actions `shouldSatisfy` \ts -> "Did you mean `alpha`?" `elem` ts && "Add missing field `alpah` to `box`" `elem` ts
+        titles actions `shouldSatisfy` \ts ->
+          "Did you mean `alpha`?" `elem` ts
+            && "Add missing field `alpah` to `box`" `elem` ts
 
     it "removes unused let bindings and prefixes unused parameters" $
       withDoc (Text.unlines ["let", "  spare = 2;", "  f = x: 1;", "in f"]) $ \run -> do
-        let unusedLet = object ["message" .= ("`spare` is declared but never used." :: Text), "code" .= ("TL0001" :: Text), "range" .= rangeJson 1 2 1 7]
-            unusedParam = object ["message" .= ("`x` is a parameter but never used." :: Text), "code" .= ("TL0001" :: Text), "range" .= rangeJson 2 6 2 7]
-        actions <- run codeActionsDocument (codeActionParams (1, 2) [unusedLet, unusedParam])
+        let unusedLet =
+              object
+                [ "message" .= ("`spare` is declared but never used." :: Text),
+                  "code" .= ("TL0001" :: Text),
+                  "range" .= rangeJson 1 2 1 7
+                ]
+            unusedParam =
+              object
+                [ "message" .= ("`x` is a parameter but never used." :: Text),
+                  "code" .= ("TL0001" :: Text),
+                  "range" .= rangeJson 2 6 2 7
+                ]
+        actions <-
+          run codeActionsDocument (codeActionParams (1, 2) [unusedLet, unusedParam])
         titles actions `shouldSatisfy` \ts -> "Remove unused binding `spare`" `elem` ts && "Prefix `x` with `_`" `elem` ts
 
     it "inserts an inferred type signature for an unannotated binding" $
@@ -195,11 +322,14 @@ spec = do
 
     it "returns nested selection ranges" $
       withDoc "let x = { a = [ 1 2 ]; }; in x" $ \run -> do
-        result <- run (\r _ d m -> selectionRangeDocument r d m) (positionsParams [(0, 16)])
+        result <-
+          run (\r _ d m -> selectionRangeDocument r d m) (positionsParams [(0, 16)])
         selectionDepth result `shouldSatisfy` (>= 4)
 
-    it "builds a hierarchical outline" $
-      withDoc (Text.unlines ["let", "  pkg = { meta = { license = \"MIT\"; }; };", "in pkg"]) $ \run -> do
+    it "builds a hierarchical outline"
+      $ withDoc
+        (Text.unlines ["let", "  pkg = { meta = { license = \"MIT\"; }; };", "in pkg"])
+      $ \run -> do
         result <- run documentSymbolsHierarchicalDocument (at 0 0)
         outline result `shouldBe` [("pkg", [("meta", [("license", [])])])]
 
@@ -207,7 +337,11 @@ spec = do
     it "classifies parameters, type parameters, and declarations" $ do
       let content = "let id :: forall a. a -> a; id = x: x; in id 1"
           tokens = semanticTokensFor content (Left "no analysis")
-          at' col = [(semanticTokenType t, semanticTokenModifiers t) | t <- tokens, semanticTokenStart t == col]
+          at' col =
+            [ (semanticTokenType t, semanticTokenModifiers t)
+            | t <- tokens,
+              semanticTokenStart t == col
+            ]
       at' 17 `shouldBe` [(9, 1)] -- `a` declared by `forall a.`
       at' 20 `shouldBe` [(9, 0)] -- `a` used in the quantified type
       at' 33 `shouldBe` [(8, 1)] -- `x` parameter declaration
@@ -216,7 +350,14 @@ spec = do
   describe "document store" $
     it "updates text without analysing and only stores results for current text" $ do
       let docs = documentsFromList [("/tmp/main.tynix", "1")]
-          change = object ["params" .= object ["textDocument" .= object ["uri" .= ("file:///tmp/main.tynix" :: Text)], "contentChanges" .= [object ["text" .= ("2" :: Text)]]]]
+          change =
+            object
+              [ "params"
+                  .= object
+                    [ "textDocument" .= object ["uri" .= ("file:///tmp/main.tynix" :: Text)],
+                      "contentChanges" .= [object ["text" .= ("2" :: Text)]]
+                    ]
+              ]
       case updateDocumentText docs change of
         Right (docs', file) -> do
           lookupDocumentText file docs' `shouldBe` Just "2"
@@ -225,9 +366,16 @@ spec = do
 
   describe "scanner robustness" $
     it "scans a large generated document quickly" $ do
-      let content = Text.unlines (["let"] <> [Text.pack ("  v" <> show i <> " = " <> show i <> ";") | i <- [1 :: Int .. 3000]] <> ["in v1"])
+      let content =
+            Text.unlines
+              ( ["let"]
+                  <> [ Text.pack ("  v" <> show i <> " = " <> show i <> ";") | i <- [1 :: Int .. 3000]
+                     ]
+                  <> ["in v1"]
+              )
           scan = scanDocument content
-      length (show (length (semanticTokensFor content (Left "none")))) `shouldSatisfy` (> 0)
+      length (show (length (semanticTokensFor content (Left "none"))))
+        `shouldSatisfy` (> 0)
       scan `seq` pure ()
 
 -- Helpers -----------------------------------------------------------------------------------
@@ -258,7 +406,8 @@ withDiagnostics content body =
     let file = root </> "main.tynix"
         docs = documentsFromList [(file, content)]
     result <- analyzeTextForEditor file content
-    diags <- documentDiagnostics readFileStub analyzeTextForEditor docs file content result
+    diags <-
+      documentDiagnostics readFileStub analyzeTextForEditor docs file content result
     body diags
 
 data RequestShape
@@ -271,11 +420,29 @@ shapeMessage :: FilePath -> RequestShape -> Value
 shapeMessage file shape = case shape of
   AtPos l c -> positionMessage file (l, c)
   RenameAt l c newName ->
-    object ["id" .= (1 :: Int), "params" .= object ["textDocument" .= uriObj file, "position" .= posObj l c, "newName" .= newName]]
+    object
+      [ "id" .= (1 :: Int),
+        "params"
+          .= object
+            ["textDocument" .= uriObj file, "position" .= posObj l c, "newName" .= newName]
+      ]
   CodeAction (l, c) diags ->
-    object ["id" .= (1 :: Int), "params" .= object ["textDocument" .= uriObj file, "range" .= rangeJson l c l c, "context" .= object ["diagnostics" .= diags]]]
+    object
+      [ "id" .= (1 :: Int),
+        "params"
+          .= object
+            [ "textDocument" .= uriObj file,
+              "range" .= rangeJson l c l c,
+              "context" .= object ["diagnostics" .= diags]
+            ]
+      ]
   Positions ps ->
-    object ["id" .= (1 :: Int), "params" .= object ["textDocument" .= uriObj file, "positions" .= [posObj l c | (l, c) <- ps]]]
+    object
+      [ "id" .= (1 :: Int),
+        "params"
+          .= object
+            ["textDocument" .= uriObj file, "positions" .= [posObj l c | (l, c) <- ps]]
+      ]
 
 renameAt :: Int -> Int -> Text -> RequestShape
 renameAt = RenameAt
@@ -288,7 +455,10 @@ positionsParams = Positions
 
 positionMessage :: FilePath -> (Int, Int) -> Value
 positionMessage file (l, c) =
-  object ["id" .= (1 :: Int), "params" .= object ["textDocument" .= uriObj file, "position" .= posObj l c]]
+  object
+    [ "id" .= (1 :: Int),
+      "params" .= object ["textDocument" .= uriObj file, "position" .= posObj l c]
+    ]
 
 uriObj :: FilePath -> Value
 uriObj file = object ["uri" .= ("file://" <> Text.pack file)]
@@ -303,7 +473,8 @@ readFileStub :: FilePath -> IO (Either String Text)
 readFileStub = fmap Right . TextIO.readFile
 
 withTree :: [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
-withTree files action = bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
+withTree files action =
+  bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
   where
     createRoot = do
       tmp <- getTemporaryDirectory

@@ -35,7 +35,9 @@ spec = describe "higher-kinded kind inference" $ do
           [ plainAlias "Id" ["f"] (TVar "f"),
             plainAlias "Apply" ["f", "a"] (TApp (TVar "f") (TVar "a"))
           ]
-    inferTypeKind kinds (TApp (TApp (TCon "Apply") (TApp (TCon "Id") (TCon "List"))) tInt)
+    inferTypeKind
+      kinds
+      (TApp (TApp (TCon "Apply") (TApp (TCon "Id") (TCon "List"))) tInt)
       `shouldBe` Right KType
 
   it "rejects applying concrete types as constructors" $
@@ -49,14 +51,17 @@ spec = describe "higher-kinded kind inference" $ do
   it "gives every builtin constructor the arity its surface syntax implies" $ do
     inferTypeKind mempty tInt `shouldBe` Right KType
     inferTypeKind mempty (TCon "List") `shouldBe` Right (KFun KType KType)
-    inferTypeKind mempty (TCon "Vec") `shouldBe` Right (KFun KType (KFun KType KType))
+    inferTypeKind mempty (TCon "Vec")
+      `shouldBe` Right (KFun KType (KFun KType KType))
     inferTypeKind mempty (TCon "Matrix")
       `shouldBe` Right (KFun KType (KFun KType (KFun KType KType)))
-    inferTypeKind mempty (TCon "Tensor") `shouldBe` Right (KFun KType (KFun KType KType))
+    inferTypeKind mempty (TCon "Tensor")
+      `shouldBe` Right (KFun KType (KFun KType KType))
     inferTypeKind mempty (TCon "Tuple") `shouldBe` Right (KFun KType KType)
     inferTypeKind mempty (TCon "Range")
       `shouldBe` Right (KFun KType (KFun KType (KFun KType KType)))
-    inferTypeKind mempty (TCon "Unit") `shouldBe` Right (KFun KType (KFun KType KType))
+    inferTypeKind mempty (TCon "Unit")
+      `shouldBe` Right (KFun KType (KFun KType KType))
 
   it "gives every ground type form kind Type" $
     mapM_
@@ -85,7 +90,8 @@ spec = describe "higher-kinded kind inference" $ do
     inferTypeKind mempty (TCon "Mystery") `shouldSatisfy` isMetaKind
 
   it "requires both branches of a conditional type to agree" $ do
-    inferTypeKind mempty (TConditional tInt tInt tString tBool) `shouldBe` Right KType
+    inferTypeKind mempty (TConditional tInt tInt tString tBool)
+      `shouldBe` Right KType
     inferTypeKind mempty (TConditional tInt tInt (TCon "List") tBool)
       `shouldSatisfy` isLeft
 

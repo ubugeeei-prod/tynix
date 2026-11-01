@@ -83,11 +83,16 @@ spec = do
       renderExpr (EString (DoubleQuoted "a ${b}")) `shouldBe` "\"a \\${b}\""
 
     it "round-trips interpolated strings whose literal runs need escaping" $ do
-      expectExprRoundTrip (EInterp InterpDouble [StrText "a\"b", StrExpr (EVar "x"), StrText "c\\d"])
-      expectExprRoundTrip (EInterp InterpDouble [StrExpr (EVar "x"), StrText "${literal}"])
-      expectExprRoundTrip (EInterp InterpIndented [StrText "'", StrExpr (EVar "x"), StrText "'"])
-      expectExprRoundTrip (EInterp InterpIndented [StrText "a'", StrExpr (EVar "x"), StrText "'b"])
-      expectExprRoundTrip (EInterp InterpIndented [StrText "${", StrExpr (EVar "x"), StrText "}"])
+      expectExprRoundTrip
+        (EInterp InterpDouble [StrText "a\"b", StrExpr (EVar "x"), StrText "c\\d"])
+      expectExprRoundTrip
+        (EInterp InterpDouble [StrExpr (EVar "x"), StrText "${literal}"])
+      expectExprRoundTrip
+        (EInterp InterpIndented [StrText "'", StrExpr (EVar "x"), StrText "'"])
+      expectExprRoundTrip
+        (EInterp InterpIndented [StrText "a'", StrExpr (EVar "x"), StrText "'b"])
+      expectExprRoundTrip
+        (EInterp InterpIndented [StrText "${", StrExpr (EVar "x"), StrText "}"])
 
     it "round-trips generated nasty double-quoted text" $
       property $ \(NastyText raw) ->
@@ -107,12 +112,17 @@ spec = do
 
   describe "multi-line string bodies" $ do
     it "does not pick up the enclosing indentation" $ do
-      let rendered = renderExpr (EAttrSet [AttrField "hook" (EString (Indented "\nline one\nline two\n"))])
+      let rendered =
+            renderExpr
+              (EAttrSet [AttrField "hook" (EString (Indented "\nline one\nline two\n"))])
       rendered `shouldBe` "{\n  hook = ''\nline one\nline two\n'';\n}"
 
     it "round-trips a multi-line indented string nested in an attribute set" $
       expectExprRoundTrip
-        (EAttrSet [AttrField "hook" (EString (Indented "\n  echo 'go'\n  export DIR=\"$HOME\"\n"))])
+        ( EAttrSet
+            [ AttrField "hook" (EString (Indented "\n  echo 'go'\n  export DIR=\"$HOME\"\n"))
+            ]
+        )
 
     it "round-trips a multi-line indented string nested two levels deep" $
       expectExprRoundTrip
@@ -153,7 +163,14 @@ spec = do
     it "round-trips attribute names that need quoting" $
       mapM_
         (\name -> expectExprRoundTrip (EAttrSet [AttrField name (EInt 1)]))
-        ["plain", "with space", "quote\"inside", "back\\slash", "0leading", "", "inherit"]
+        [ "plain",
+          "with space",
+          "quote\"inside",
+          "back\\slash",
+          "0leading",
+          "",
+          "inherit"
+        ]
 
     it "keeps `inherit` quoted so it is not read back as a keyword" $
       renderExpr (EAttrSet [AttrField "inherit" (EInt 1)])
@@ -207,7 +224,9 @@ spec = do
           TForall ["a"] (TFun Many (TVar "a") (TVar "a")),
           TApp (TApp (TCon "Vec") (TLit (LInt 3))) tInt,
           TApp (TApp (TApp (TCon "Matrix") (TLit (LInt 2))) (TLit (LInt 3))) tInt,
-          TApp (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)])) tInt,
+          TApp
+            (TApp (TCon "Tensor") (TTypeList [TLit (LInt 2), TLit (LInt 3), TLit (LInt 4)]))
+            tInt,
           TApp (TCon "Tuple") (TTypeList [tInt, tString]),
           TConditional (tList tInt) (tList (TInfer "a")) (TVar "a") tDynamic
         ]
@@ -298,7 +317,9 @@ roundTripsAsExpr expr =
   let rendered = renderExpr expr
    in case parseProgram "pretty.tynix" rendered of
         Left err ->
-          counterexample ("rendered " <> show rendered <> " failed to parse: " <> Text.unpack err) False
+          counterexample
+            ("rendered " <> show rendered <> " failed to parse: " <> Text.unpack err)
+            False
         Right program ->
           counterexample ("rendered as " <> show rendered) $
             (markedValue <$> programExpr program) === Just expr

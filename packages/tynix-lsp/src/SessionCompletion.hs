@@ -50,7 +50,7 @@ import Data.Char (toLower)
 import Data.List (isSubsequenceOf, sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -114,7 +114,20 @@ item label kind grp =
     }
 
 -- LSP CompletionItemKind values
-kMethod, kFunction, kField, kVariable, kModule, kProperty, kKeyword, kSnippet, kFile, kFolder, kTypeParameter, kStruct, kClass :: Int
+kMethod,
+  kFunction,
+  kField,
+  kVariable,
+  kModule,
+  kProperty,
+  kKeyword,
+  kSnippet,
+  kFile,
+  kFolder,
+  kTypeParameter,
+  kStruct,
+  kClass ::
+    Int
 kMethod = 2
 kFunction = 3
 kField = 5
@@ -132,12 +145,17 @@ kTypeParameter = 25
 -- | Classify the cursor at a character offset and produce candidates.
 completeAt :: CompletionEnv -> Ctx -> Int -> CompletionOutcome
 completeAt env ctx off
-  | Just (dir, partial, range) <- pathContext scan off = PathEntries dir partial range
+  | Just (dir, partial, range) <- pathContext scan off =
+      PathEntries dir partial range
   | insideCommentOrString scan off = Items (off, off) []
-  | not (null dotPath) = Items wordRange (filterItems prefix (memberItems env ctx off dotPath))
-  | typeContext scan wordStart = Items wordRange (filterItems prefix (typeItems env ctx off))
-  | Just fieldItems <- attrKeyContext ctx wordStart = Items wordRange (filterItems prefix fieldItems)
-  | otherwise = Items wordRange (filterItems prefix (expressionItems env ctx off wordStart))
+  | not (null dotPath) =
+      Items wordRange (filterItems prefix (memberItems env ctx off dotPath))
+  | typeContext scan wordStart =
+      Items wordRange (filterItems prefix (typeItems env ctx off))
+  | Just fieldItems <- attrKeyContext ctx wordStart =
+      Items wordRange (filterItems prefix fieldItems)
+  | otherwise =
+      Items wordRange (filterItems prefix (expressionItems env ctx off wordStart))
   where
     scan = ctxScan ctx
     (dotPath, prefix) = dottedFragment scan off
@@ -160,14 +178,22 @@ dottedFragment scan off =
           | any Text.null revPath -> ([], partial)
           | otherwise -> (reverse revPath, partial)
   where
-    identCharC c = c == '_' || c == '\'' || c == '-' || c `elem` ['0' .. '9'] || c `elem` ['a' .. 'z'] || c `elem` ['A' .. 'Z']
+    identCharC c =
+      c == '_'
+        || c == '\''
+        || c == '-'
+        || c `elem` ['0' .. '9']
+        || c `elem` ['a' .. 'z']
+        || c `elem` ['A' .. 'Z']
 
 -- | Path literal under the cursor, split into directory and partial name.
 pathContext :: Scan -> Int -> Maybe (FilePath, Text, (Int, Int))
 pathContext scan off = do
   i <- codeTokenIndexAt scan off
   t <- codeToken scan i
-  if tokKind t == KPath && tokStart t < off && any (`Text.isPrefixOf` tokText t) ["./", "../", "/", "~/"]
+  if tokKind t == KPath
+    && tokStart t < off
+    && any (`Text.isPrefixOf` tokText t) ["./", "../", "/", "~/"]
     then
       let typed = Text.take (off - tokStart t) (tokText t)
           (dir, partial) = Text.breakOnEnd "/" typed
@@ -283,7 +309,10 @@ typeContext scan wordStart =
       | otherwise = walk (k - 1) (fuel - 1)
     statementIsTypeAlias k fuel
       | k < 0 || fuel <= 0 = False
-      | textAt k == "type" && kindAt k == Just KIdent && (k == 0 || textAt (k - 1) `elem` [";", "}"]) = True
+      | textAt k == "type"
+          && kindAt k == Just KIdent
+          && (k == 0 || textAt (k - 1) `elem` [";", "}"]) =
+          True
       | textAt k `elem` [";", "{", "(", "=", ":"] || kindAt k == Just KKeyword = False
       | otherwise = statementIsTypeAlias (k - 1) (fuel - 1)
 
@@ -335,7 +364,8 @@ typeItems env ctx off =
          name /= "TynixLspProbe__"
        ]
     <> [ (item (binderName b) kClass 0)
-           { itemDetail = ("type " <>) . (binderName b <>) . (" = " <>) <$> binderAnnotation b,
+           { itemDetail =
+               ("type " <>) . (binderName b <>) . (" = " <>) <$> binderAnnotation b,
              itemDoc = binderDoc ctx b
            }
        | b <- scanBinders scan,
@@ -371,7 +401,9 @@ attrKeyContext ctx wordStart = do
   if tokText openTok /= "{" then Nothing else Just ()
   prev <- codeTokenBefore scan wordStart
   let prevText = maybe "" tokText (codeToken scan prev)
-  if prev == opener || (prevText `elem` [";", ","] && prev > opener) then Just () else Nothing
+  if prev == opener || (prevText `elem` [";", ","] && prev > opener)
+    then Just ()
+    else Nothing
   let isPattern = isPatternGroup scan opener
   expected <- expectedRecord ctx opener (6 :: Int)
   let present = Set.fromList (attrsetFieldNames scan opener)
@@ -389,9 +421,17 @@ attrKeyContext ctx wordStart = do
     fields
       <> [ (item "..." kKeyword 4){itemDetail = Just "accept additional attributes"}
          | isPattern,
-           "..." `notElem` map tokText (mapMaybe (codeToken scan) [opener + 1 .. fromMaybe opener (matchingCloser scan opener)])
+           "..."
+             `notElem` map
+               tokText
+               ( mapMaybe
+                   (codeToken scan)
+                   [opener + 1 .. fromMaybe opener (matchingCloser scan opener)]
+               )
          ]
-      <> [(item "inherit" kKeyword 4){itemInsert = Just "inherit $1;", itemSnippet = True} | not isPattern]
+      <> [ (item "inherit" kKeyword 4){itemInsert = Just "inherit $1;", itemSnippet = True}
+         | not isPattern
+         ]
   where
     scan = ctxScan ctx
 
@@ -430,18 +470,19 @@ expectedRecord ctx i fuel
           let nameIx = i - 2
               name = textAt nameIx
           case binderAtToken scan nameIx of
-            Just b -> binderType ctx b
-            Nothing ->
-              case enclosingOpeners scan (maybe 0 tokStart (codeToken scan nameIx)) of
-                outer : _
-                  | textAt outer == "{" ->
-                      if rootAttrsetOpener scan == Just outer
-                        then rootField name
-                        else do
-                          outerTy <- expectedRecord ctx outer (fuel - 1)
-                          lookupRecordField aliases outerTy name
-                _ -> Nothing
+            Just binder -> binderType ctx binder
+            Nothing -> enclosingFieldType nameIx name
       | otherwise = Nothing
+    enclosingFieldType nameIx name = do
+      outer <-
+        listToMaybe (enclosingOpeners scan (maybe 0 tokStart (codeToken scan nameIx)))
+      if textAt outer /= "{"
+        then Nothing
+        else
+          if rootAttrsetOpener scan == Just outer
+            then rootField name
+            else
+              expectedRecord ctx outer (fuel - 1) >>= \outerTy -> lookupRecordField aliases outerTy name
     rootField name = do
       analysis <- ctxAnalysis ctx
       root <- analysisRoot analysis
@@ -454,7 +495,8 @@ expectedRecord ctx i fuel
       if isPattern then Nothing else Just dom
     -- the root lambda isPattern of the file
     fromRoot
-      | scanRootStart scan == Just i = schemeType <$> (ctxAnalysis ctx >>= analysisRoot)
+      | scanRootStart scan == Just i =
+          schemeType <$> (ctxAnalysis ctx >>= analysisRoot)
       | otherwise = Nothing
 
 -- | Find the function being applied to the argument starting at token @i@:
@@ -470,7 +512,8 @@ calleeBefore scan i = go (i - 1) (0 :: Int) (12 :: Int)
           case matchingCloser scan k of
             Just o -> go (o - 1) (args + 1) (fuel - 1)
             Nothing -> Nothing
-      | kindAt k `elem` map Just [KString, KNumber, KPath] = go (k - 1) (args + 1) (fuel - 1)
+      | kindAt k `elem` map Just [KString, KNumber, KPath] =
+          go (k - 1) (args + 1) (fuel - 1)
       | kindAt k == Just KIdent =
           let (path, start) = selectPath k
            in case codeToken scan start of
@@ -509,7 +552,11 @@ expressionItems _env ctx off wordStart =
     localNames = Set.fromList (map binderName locals)
     localItems =
       [ let ty = binderType ctx b
-         in (item (binderName b) (maybe kVariable (\t -> if isFunction t then kFunction else kVariable) ty) 0)
+         in ( item
+                (binderName b)
+                (maybe kVariable (\t -> if isFunction t then kFunction else kVariable) ty)
+                0
+            )
               { itemDetail = Just (maybe (kindLabel b) compactType ty),
                 itemDoc = binderDoc ctx b,
                 itemFilter = Nothing
@@ -532,7 +579,10 @@ expressionItems _env ctx off wordStart =
              Set.notMember name localNames,
              not (maybe False (Map.member name . analysisBindings) analysis)
            ]
-        <> [ (item "default" kVariable 2){itemDetail = Just (compactType (schemeType scheme)), itemDoc = Just "Type of this file's root expression."}
+        <> [ (item "default" kVariable 2)
+               { itemDetail = Just (compactType (schemeType scheme)),
+                 itemDoc = Just "Type of this file's root expression."
+               }
            | Just scheme <- [analysis >>= analysisRoot]
            ]
     ambientItems =
@@ -544,7 +594,9 @@ expressionItems _env ctx off wordStart =
       ]
         <> [ (item "import" kFunction 3)
                { itemDetail = Just "Path -> dynamic",
-                 itemDoc = Just "Load and evaluate a Nix file. Typed by matching `declare` blocks when available."
+                 itemDoc =
+                   Just
+                     "Load and evaluate a Nix file. Typed by matching `declare` blocks when available."
                }
            | Set.notMember "import" localNames
            ]
@@ -568,7 +620,9 @@ valueKeywords =
     ("then", "Branch of an `if`"),
     ("else", "Branch of an `if`"),
     ("with", "Bring an attrset's fields into scope: `with e; body`"),
-    ("inherit", "Copy names into an attrset / let: `inherit x;` or `inherit (e) x;`"),
+    ( "inherit",
+      "Copy names into an attrset / let: `inherit x;` or `inherit (e) x;`"
+    ),
     ("rec", "Recursive attrset whose fields can refer to each other"),
     ("assert", "`assert cond; body` — evaluation fails when cond is false"),
     ("or", "Default for a missing attribute: `a.b or fallback`"),
@@ -579,31 +633,62 @@ valueKeywords =
 
 snippetItems :: Ctx -> Int -> [CompletionItem]
 snippetItems ctx wordStart =
-  [ snippet "let … in" "let" "let\n  ${1:name} = ${2:value};\nin\n${0:body}" "Local bindings",
-    snippet "if … then … else" "if" "if ${1:condition} then ${2:yes} else ${0:no}" "Conditional expression",
-    snippet "{ … }: lambda" "{" "{ ${1:lib}, ${2:pkgs}, ... }:\n$0" "Function taking an attribute set",
+  [ snippet
+      "let … in"
+      "let"
+      "let\n  ${1:name} = ${2:value};\nin\n${0:body}"
+      "Local bindings",
+    snippet
+      "if … then … else"
+      "if"
+      "if ${1:condition} then ${2:yes} else ${0:no}"
+      "Conditional expression",
+    snippet
+      "{ … }: lambda"
+      "{"
+      "{ ${1:lib}, ${2:pkgs}, ... }:\n$0"
+      "Function taking an attribute set",
     snippet "with … ;" "with" "with ${1:pkgs}; ${0}" "Bring fields into scope"
   ]
     <> [ snippet
            "package skeleton"
            "package"
-           "{ lib, stdenv, fetchurl, ... }:\n\nstdenv.mkDerivation {\n  pname = \"${1:name}\";\n  version = \"${2:0.1.0}\";\n\n  src = ${3:./.};\n\n  meta = {\n    description = \"${4:description}\";\n    license = lib.licenses.${5:mit};\n  };\n}\n"
+           "{ lib, stdenv, fetchurl, ... }:\n\nstdenv.mkDerivation {\n  pname \
+           \= \"${1:name}\";\n  version = \"${2:0.1.0}\";\n\n  src = \
+           \${3:./.};\n\n  meta = {\n    description = \"${4:description}\";\n \
+           \   license = lib.licenses.${5:mit};\n  };\n}\n"
            "`{ ... }:` package function calling `stdenv.mkDerivation`"
        | atTopLevel
        ]
-    <> [ snippet "declare block" "declare" "declare \"${1:./file.nix}\" {\n  ${2:name} :: ${3:Type};\n};\n$0" "Describe the types of an existing .nix file"
+    <> [ snippet
+           "declare block"
+           "declare"
+           "declare \"${1:./file.nix}\" {\n  ${2:name} :: ${3:Type};\n};\n$0"
+           "Describe the types of an existing .nix file"
        | atTopLevel
        ]
     <> [ snippet "type alias" "type" "type ${1:Name} = ${0:Type};" "Declare a type alias"
        | atTopLevel
        ]
-    <> [ snippet "opaque type" "opaque" "opaque type ${1:Name} = ${0:String};" "Declare a nominal type"
+    <> [ snippet
+           "opaque type"
+           "opaque"
+           "opaque type ${1:Name} = ${0:String};"
+           "Declare a nominal type"
        | atTopLevel
        ]
-    <> [ snippet "macro" "macro" "macro ${1:name} {\n  (\\$${2:x}:expr) => (${0:\\$${2:x}});\n};\n" "Declare a hygienic macro"
+    <> [ snippet
+           "macro"
+           "macro"
+           "macro ${1:name} {\n  (\\$${2:x}:expr) => (${0:\\$${2:x}});\n};\n"
+           "Declare a hygienic macro"
        | atTopLevel
        ]
-    <> [ snippet "signature + binding" "sig" "${1:name} :: ${2:Type};\n${1:name} = ${0:value};" "Typed let binding"
+    <> [ snippet
+           "signature + binding"
+           "sig"
+           "${1:name} :: ${2:Type};\n${1:name} = ${0:value};"
+           "Typed let binding"
        | inLetBindings
        ]
   where
@@ -628,7 +713,9 @@ snippetItems ctx wordStart =
 -- | Case-insensitive subsequence match; an empty prefix matches everything.
 matchesPrefix :: Text -> Text -> Bool
 matchesPrefix prefix label =
-  Text.null prefix || Text.unpack (Text.toLower prefix) `isSubsequenceOf` Text.unpack (Text.toLower label)
+  Text.null prefix
+    || Text.unpack (Text.toLower prefix)
+      `isSubsequenceOf` Text.unpack (Text.toLower label)
 
 filterItems :: Text -> [CompletionItem] -> [CompletionItem]
 filterItems prefix items =
@@ -644,7 +731,14 @@ filterItems prefix items =
       | otherwise = x : go (Set.insert (itemLabel x, itemKind x == kSnippet) seen) xs
 
 -- | Encode one item. @range@ is the replaced range in LSP coordinates.
-encodeCompletionItem :: Text -> ((Int, Int), (Int, Int)) -> Bool -> [Pair] -> Int -> CompletionItem -> Value
+encodeCompletionItem ::
+  Text ->
+  ((Int, Int), (Int, Int)) ->
+  Bool ->
+  [Pair] ->
+  Int ->
+  CompletionItem ->
+  Value
 encodeCompletionItem prefix ((sl, sc), (el, ec)) includeDocs extraData ix it =
   object $
     [ "label" .= itemLabel it,
@@ -663,14 +757,32 @@ encodeCompletionItem prefix ((sl, sc), (el, ec)) includeDocs extraData ix it =
     ]
       <> catMaybes
         [ ("detail" .=) <$> itemDetail it,
-          (\d -> "labelDetails" .= object ["description" .= shorten d]) <$> (itemDetail it >>= \d -> if itemKind it == kSnippet then Nothing else Just d),
+          (\d -> "labelDetails" .= object ["description" .= shorten d])
+            <$> (itemDetail it >>= \d -> if itemKind it == kSnippet then Nothing else Just d),
           ("filterText" .=) <$> itemFilter it,
-          if includeDocs then (\d -> "documentation" .= object ["kind" .= ("markdown" :: Text), "value" .= d]) <$> itemDoc it else Nothing,
-          if itemRetrigger it then Just ("command" .= object ["title" .= ("Suggest" :: Text), "command" .= ("editor.action.triggerSuggest" :: Text)]) else Nothing,
-          if null extraData then Nothing else Just ("data" .= object (extraData <> ["label" .= itemLabel it]))
+          if includeDocs
+            then
+              (\d -> "documentation" .= object ["kind" .= ("markdown" :: Text), "value" .= d])
+                <$> itemDoc it
+            else Nothing,
+          if itemRetrigger it
+            then
+              Just
+                ( "command"
+                    .= object
+                      [ "title" .= ("Suggest" :: Text),
+                        "command" .= ("editor.action.triggerSuggest" :: Text)
+                      ]
+                )
+            else Nothing,
+          if null extraData
+            then Nothing
+            else Just ("data" .= object (extraData <> ["label" .= itemLabel it]))
         ]
   where
-    exact = Text.toLower prefix `Text.isPrefixOf` Text.toLower (fromMaybe (itemLabel it) (itemFilter it))
+    exact =
+      Text.toLower prefix
+        `Text.isPrefixOf` Text.toLower (fromMaybe (itemLabel it) (itemFilter it))
     sortKey =
       Text.pack (show (itemGroup it))
         <> (if exact then "0" else "1")
@@ -678,18 +790,31 @@ encodeCompletionItem prefix ((sl, sc), (el, ec)) includeDocs extraData ix it =
     shorten d = if Text.length d > 60 then Text.take 57 d <> "..." else d
 
 -- | Encode a whole completion list, sorted by relevance.
-encodeCompletionList :: Text -> ((Int, Int), (Int, Int)) -> [Pair] -> [CompletionItem] -> Value
+encodeCompletionList ::
+  Text -> ((Int, Int), (Int, Int)) -> [Pair] -> [CompletionItem] -> Value
 encodeCompletionList prefix range extraData items =
-  let ordered = sortOn (\(ix, it) -> (itemGroup it, not (exactPrefix it), ix)) (zip [0 :: Int ..] (orderWithinGroups items))
+  let ordered =
+        sortOn
+          (\(ix, it) -> (itemGroup it, not (exactPrefix it), ix))
+          (zip [0 :: Int ..] (orderWithinGroups items))
       includeDocs = length items <= 150
    in object
         [ "isIncomplete" .= False,
-          "items" .= zipWith (encodeCompletionItem prefix range includeDocs extraData) [0 ..] (map snd ordered)
+          "items"
+            .= zipWith
+              (encodeCompletionItem prefix range includeDocs extraData)
+              [0 ..]
+              (map snd ordered)
         ]
   where
-    exactPrefix it = Text.toLower prefix `Text.isPrefixOf` Text.toLower (fromMaybe (itemLabel it) (itemFilter it))
+    exactPrefix it =
+      Text.toLower prefix
+        `Text.isPrefixOf` Text.toLower (fromMaybe (itemLabel it) (itemFilter it))
     -- locals keep their scope order; every other group is alphabetical
     orderWithinGroups xs =
       let (locals, others) = span' ((== 0) . itemGroup) xs
-       in locals <> sortOn (\it -> (itemGroup it, Text.map toLower (itemLabel it), itemLabel it)) others
+       in locals
+            <> sortOn
+              (\it -> (itemGroup it, Text.map toLower (itemLabel it), itemLabel it))
+              others
     span' p xs = (filter p xs, filter (not . p) xs)

@@ -116,7 +116,12 @@ import SessionTypes
     WorkspaceDocument (..),
   )
 import SessionWorkspace (findBuiltinsFile, workspaceFilesFor)
-import System.Directory (doesDirectoryExist, doesFileExist, getHomeDirectory, listDirectory)
+import System.Directory
+  ( doesDirectoryExist,
+    doesFileExist,
+    getHomeDirectory,
+    listDirectory,
+  )
 import System.FilePath (isAbsolute, normalise, takeDirectory, (</>))
 
 -- | Compute hover information for the requested position.
@@ -212,7 +217,8 @@ fullDocumentEdit content newText =
     [ "range"
         .= object
           [ "start" .= object ["line" .= (0 :: Int), "character" .= (0 :: Int)],
-            "end" .= object ["line" .= (length (Text.lines content) + 1), "character" .= (0 :: Int)]
+            "end"
+              .= object ["line" .= (length (Text.lines content) + 1), "character" .= (0 :: Int)]
           ],
       "newText" .= newText
     ]
@@ -240,8 +246,17 @@ legacyDefinitionDocument readDocument analyze docs msg = do
       pure $
         maybe
           Null
-          (\(targetFile, targetLine, startChar, endChar) -> location targetFile targetLine startChar endChar)
-          (resolveDefinitionLocation file content workspace builtinsFile result lineNo charNo)
+          ( \(targetFile, targetLine, startChar, endChar) -> location targetFile targetLine startChar endChar
+          )
+          ( resolveDefinitionLocation
+              file
+              content
+              workspace
+              builtinsFile
+              result
+              lineNo
+              charNo
+          )
 
 -- | Compute references for the selected symbol.
 --
@@ -268,7 +283,11 @@ legacyReferencesDocument readDocument analyze docs msg = do
             [ location path foundLine startChar endChar
             | doc <- workspaceDocumentsForTarget workspace target,
               let path = workspaceDocumentFile doc,
-              (foundLine, startChar, endChar) <- symbolRanges (workspaceDocumentContent doc) (referenceTargetNeedle target) (referenceTargetMode target)
+              (foundLine, startChar, endChar) <-
+                symbolRanges
+                  (workspaceDocumentContent doc)
+                  (referenceTargetNeedle target)
+                  (referenceTargetMode target)
             ]
 
 -- | Highlight occurrences of the selected symbol inside the active buffer.
@@ -325,10 +344,18 @@ legacyRenameDocument readDocument analyze docs msg = do
               Nothing -> Null
               Just target ->
                 let edits =
-                      [ (path, map (\(foundLine, startChar, endChar) -> textEdit foundLine startChar endChar newName) ranges)
+                      [ ( path,
+                          map
+                            (\(foundLine, startChar, endChar) -> textEdit foundLine startChar endChar newName)
+                            ranges
+                        )
                       | doc <- workspaceDocumentsForTarget workspace target,
                         let path = workspaceDocumentFile doc,
-                        let ranges = symbolRanges (workspaceDocumentContent doc) (referenceTargetNeedle target) (referenceTargetMode target),
+                        let ranges =
+                              symbolRanges
+                                (workspaceDocumentContent doc)
+                                (referenceTargetNeedle target)
+                                (referenceTargetMode target),
                         not (null ranges)
                       ]
                  in workspaceEdit edits
@@ -347,7 +374,10 @@ documentSymbolsDocument readDocument analyze docs msg = do
     Left _ -> pure (toJSON ([] :: [Value]))
     Right content -> do
       result <- loadDocumentAnalysis readDocument analyze docs file
-      pure (toJSON (map indexedSymbolInformation (documentIndexedSymbols file content result)))
+      pure
+        ( toJSON
+            (map indexedSymbolInformation (documentIndexedSymbols file content result))
+        )
 
 -- | Search symbols across the surrounding workspace.
 workspaceSymbolsDocument ::
@@ -361,11 +391,15 @@ workspaceSymbolsDocument readDocument analyze docs msg =
     Nothing -> pure (toJSON ([] :: [Value]))
     Just seedFile -> do
       workspace <- loadWorkspaceDocuments readDocument analyze docs seedFile
-      let query = Text.toCaseFold (fromMaybe "" (field "params" msg >>= field "query" >>= asText))
+      let query =
+            Text.toCaseFold (fromMaybe "" (field "params" msg >>= field "query" >>= asText))
           matches symbol =
             Text.null query
               || query `Text.isInfixOf` Text.toCaseFold (indexedSymbolName symbol)
-              || maybe False ((query `Text.isInfixOf`) . Text.toCaseFold) (indexedSymbolContainer symbol)
+              || maybe
+                False
+                ((query `Text.isInfixOf`) . Text.toCaseFold)
+                (indexedSymbolContainer symbol)
           symbols = take 200 (filter matches (workspaceIndexedSymbols workspace))
       pure (toJSON (map indexedSymbolInformation symbols))
 
@@ -388,25 +422,31 @@ legacyCodeActionsDocument readDocument analyze docs msg = do
       result <- loadDocumentAnalysis readDocument analyze docs file
       workspace <- loadWorkspaceDocuments readDocument analyze docs file
       let diagnostics = diagnosticPayloads msg
-          candidates = nub (documentCandidateNames result <> map indexedSymbolName (workspaceIndexedSymbols workspace) <> ["builtins", "import"])
-          actions =
-            concatMap
-              ( \diagnostic ->
-                  let message = fromMaybe "" (field "message" diagnostic >>= asText)
-                      fixes = directiveActions file content diagnostic
-                      renameFix =
-                        case (diagnosticRange diagnostic, diagnosticSymbolName message, closestCandidate candidates =<< diagnosticSymbolName message) of
-                          (Just (lineNo, startChar, endChar), Just current, Just replacement)
-                            | current /= replacement ->
-                                [ quickFixAction
-                                    ("Replace with `" <> replacement <> "`")
-                                    file
-                                    [textEdit lineNo startChar endChar replacement]
-                                ]
-                          _ -> []
-                   in fixes <> renameFix
+          candidates =
+            nub
+              ( documentCandidateNames result
+                  <> map indexedSymbolName (workspaceIndexedSymbols workspace)
+                  <> ["builtins", "import"]
               )
-              diagnostics
+          actionsFor diagnostic =
+            directiveActions file content diagnostic <> renameFix diagnostic
+          renameFix diagnostic =
+            case suggestion diagnostic of
+              Just ((lineNo, startChar, endChar), current, replacement)
+                | current /= replacement ->
+                    [ quickFixAction
+                        ("Replace with `" <> replacement <> "`")
+                        file
+                        [textEdit lineNo startChar endChar replacement]
+                    ]
+              _ -> []
+          suggestion diagnostic = do
+            range <- diagnosticRange diagnostic
+            let message = fromMaybe "" (field "message" diagnostic >>= asText)
+            current <- diagnosticSymbolName message
+            replacement <- closestCandidate candidates current
+            pure (range, current, replacement)
+          actions = concatMap actionsFor diagnostics
       pure (toJSON actions)
 
 -- | Return LSP folding ranges for one document.
@@ -474,11 +514,15 @@ data DeclarationIndex = DeclarationIndex
     declAliasDocs :: Map.Map Text Text
   }
 
-loadDeclarationIndex :: DocumentReader -> Documents -> FilePath -> Text -> IO DeclarationIndex
+loadDeclarationIndex ::
+  DocumentReader -> Documents -> FilePath -> Text -> IO DeclarationIndex
 loadDeclarationIndex readDocument docs file content = do
   builtinsFile <- findBuiltinsFile file
   files <- workspaceFilesFor file
-  let declFiles = take 200 (nub (maybe [] pure builtinsFile <> filter (".d.tynix" `isSuffixOf`) files))
+  let declFiles =
+        take
+          200
+          (nub (maybe [] pure builtinsFile <> filter (".d.tynix" `isSuffixOf`) files))
   scans <- forM (filter (/= file) declFiles) $ \path -> do
     loaded <- loadDocumentContent readDocument docs path
     pure (either (const Nothing) (\text -> Just (path, scanDocument text)) loaded)
@@ -487,13 +531,23 @@ loadDeclarationIndex readDocument docs file content = do
   pure
     DeclarationIndex
       { declEntries = [(path, sc, d) | (path, sc) <- allScans, d <- ambientDocs sc],
-        declAliasDocs = Map.fromList [(name, doc) | (_, sc) <- catMaybes scans, (name, (doc, _)) <- Map.toList (aliasDocs sc)]
+        declAliasDocs =
+          Map.fromList
+            [ (name, doc)
+            | (_, sc) <- catMaybes scans,
+              (name, (doc, _)) <- Map.toList (aliasDocs sc)
+            ]
       }
 
 completionEnvOf :: DeclarationIndex -> CompletionEnv
 completionEnvOf index =
   CompletionEnv
-    { envBuiltinDocs = Map.fromList [(ambientDocName d, d) | (_, _, d) <- declEntries index, ambientDocTarget d == "builtins"],
+    { envBuiltinDocs =
+        Map.fromList
+          [ (ambientDocName d, d)
+          | (_, _, d) <- declEntries index,
+            ambientDocTarget d == "builtins"
+          ],
       envAmbientDocs =
         Map.fromListWith
           (flip (<>))
@@ -505,7 +559,9 @@ completionEnvOf index =
     }
 
 loadEnv :: DocumentReader -> Documents -> Request -> IO CompletionEnv
-loadEnv readDocument docs r = completionEnvOf <$> loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
+loadEnv readDocument docs r =
+  completionEnvOf
+    <$> loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
 
 -- Completion -------------------------------------------------------------------------
 
@@ -513,7 +569,8 @@ emptyCompletionList :: Value
 emptyCompletionList = object ["isIncomplete" .= False, "items" .= ([] :: [Value])]
 
 -- | Context-aware completion (see 'SessionCompletion').
-completionDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+completionDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 completionDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
@@ -526,11 +583,18 @@ completionFor :: CompletionEnv -> Request -> IO Value
 completionFor env r =
   case completeAt env (requestContext r) (requestOffset r) of
     Items range items ->
-      pure (encodeCompletionList (slice range) (lineRangeOf scan range) dataPairs items)
+      pure
+        (encodeCompletionList (slice range) (lineRangeOf scan range) dataPairs items)
     PathEntries dir partial range -> do
       base <- resolveCompletionDir (requestFile r) dir
       entries <- listEntries base
-      pure (encodeCompletionList partial (lineRangeOf scan range) [] (pathCompletionItems partial entries))
+      pure
+        ( encodeCompletionList
+            partial
+            (lineRangeOf scan range)
+            []
+            (pathCompletionItems partial entries)
+        )
   where
     scan = requestScan r
     slice (s, e) = Text.take (e - s) (Text.drop s (requestContent r))
@@ -554,7 +618,8 @@ listEntries dir = do
 
 -- | @completionItem/resolve@: recompute the item at its recorded position to
 -- attach documentation that large lists omit.
-completionResolveDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+completionResolveDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 completionResolveDocument readDocument analyze docs msg = do
   let itemValue = fromMaybe Null (field "params" msg)
       dat = field "data" itemValue
@@ -573,13 +638,19 @@ completionResolveDocument readDocument analyze docs msg = do
             Items _ items
               | it : _ <- filter ((== label) . itemLabel) items,
                 Just doc <- itemDoc it ->
-                  Object (KeyMap.insert "documentation" (object ["kind" .= ("markdown" :: Text), "value" .= doc]) obj)
+                  Object
+                    ( KeyMap.insert
+                        "documentation"
+                        (object ["kind" .= ("markdown" :: Text), "value" .= doc])
+                        obj
+                    )
             _ -> itemValue
     _ -> pure itemValue
 
 -- Hover / signature help ---------------------------------------------------------------
 
-hoverDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+hoverDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 hoverDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
@@ -595,7 +666,8 @@ hoverDocument readDocument analyze docs msg = do
               ]
         Nothing -> legacyHoverDocument readDocument analyze docs msg
 
-signatureHelpDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+signatureHelpDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 signatureHelpDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
@@ -608,7 +680,8 @@ signatureHelpDocument readDocument analyze docs msg = do
 
 -- Definition / references / rename ---------------------------------------------------
 
-definitionDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+definitionDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 definitionDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
@@ -618,12 +691,14 @@ definitionDocument readDocument analyze docs msg = do
       case localSymbolAt scan (requestOffset r) of
         Just sym -> pure (locationOf (requestFile r) scan (declarationRange sym))
         Nothing -> do
-          viaPath <- pathDefinition r
-          case viaPath of
-            Just loc -> pure loc
-            Nothing -> do
-              viaImport <- importedMemberDefinition readDocument docs r
-              maybe (legacyDefinitionDocument readDocument analyze docs msg) pure viaImport
+          target <-
+            firstLocation [pathDefinition r, importedMemberDefinition readDocument docs r]
+          maybe (legacyDefinitionDocument readDocument analyze docs msg) pure target
+  where
+    firstLocation [] = pure Nothing
+    firstLocation (candidate : rest) = do
+      target <- candidate
+      maybe (firstLocation rest) (pure . Just) target
 
 declarationRange :: LocalSymbol -> (Int, Int)
 declarationRange sym = case sym of
@@ -643,7 +718,13 @@ pathDefinition r =
           exists <- doesFileExist candidate
           pure $
             if exists
-              then Just (object ["uri" .= pathUri candidate, "range" .= object ["start" .= zeroPos, "end" .= zeroPos]])
+              then
+                Just
+                  ( object
+                      [ "uri" .= pathUri candidate,
+                        "range" .= object ["start" .= zeroPos, "end" .= zeroPos]
+                      ]
+                  )
               else Nothing
     _ -> pure Nothing
   where
@@ -652,12 +733,14 @@ pathDefinition r =
 
 -- | @m.name@ where @m = import ./file.nix@: jump to the @declare@ entry that
 -- types it, or to the binding in the imported file.
-importedMemberDefinition :: DocumentReader -> Documents -> Request -> IO (Maybe Value)
+importedMemberDefinition ::
+  DocumentReader -> Documents -> Request -> IO (Maybe Value)
 importedMemberDefinition readDocument docs r =
   case importedTarget of
     Nothing -> pure Nothing
     Just (target, name) -> do
-      index <- loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
+      index <-
+        loadDeclarationIndex readDocument docs (requestFile r) (requestContent r)
       case [ locationOf path sc (ambientDocOffset d, ambientDocOffset d + Text.length name)
            | (path, sc, d) <- declEntries index,
              ambientDocName d == name,
@@ -693,25 +776,36 @@ importedMemberDefinition readDocument docs r =
       importTok <- codeToken scan from
       pathTok <- codeToken scan (from + 1)
       if tokText importTok == "import" && tokKind pathTok == KPath
-        then Just (Check.resolvePath (requestFile r) (Text.unpack (tokText pathTok)), tokText t)
+        then
+          Just
+            (Check.resolvePath (requestFile r) (Text.unpack (tokText pathTok)), tokText t)
         else Nothing
 
-referencesDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+referencesDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 referencesDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
     Right r
       | Just sym <- localSymbolAt (requestScan r) (requestOffset r) -> do
-          let includeDecl = fromMaybe True (field "params" msg >>= field "context" >>= field "includeDeclaration" >>= asBool)
+          let includeDecl =
+                fromMaybe
+                  True
+                  (field "params" msg >>= field "context" >>= field "includeDeclaration" >>= asBool)
               decl = declarationRange sym
-              ranges = [range | range <- localOccurrences (requestScan r) sym, includeDecl || range /= decl]
+              ranges =
+                [ range
+                | range <- localOccurrences (requestScan r) sym,
+                  includeDecl || range /= decl
+                ]
           pure (toJSON (map (locationOf (requestFile r) (requestScan r)) ranges))
     _ -> legacyReferencesDocument readDocument analyze docs msg
   where
     asBool (Bool b) = Just b
     asBool _ = Nothing
 
-documentHighlightsDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+documentHighlightsDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 documentHighlightsDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   case loaded of
@@ -723,7 +817,8 @@ documentHighlightsDocument readDocument analyze docs msg = do
             ]
     _ -> legacyDocumentHighlightsDocument readDocument analyze docs msg
 
-renameDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+renameDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 renameDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   let newName = fromMaybe "" (field "params" msg >>= field "newName" >>= asText)
@@ -731,20 +826,50 @@ renameDocument readDocument analyze docs msg = do
     Right r
       | validIdentifier newName,
         Just sym <- localSymbolAt (requestScan r) (requestOffset r) ->
-          pure (workspaceEdit [(requestFile r, [editOf (requestScan r) range newName | range <- localOccurrences (requestScan r) sym])])
+          pure
+            ( workspaceEdit
+                [ ( requestFile r,
+                    [ editOf (requestScan r) range newName
+                    | range <- localOccurrences (requestScan r) sym
+                    ]
+                  )
+                ]
+            )
     _ -> legacyRenameDocument readDocument analyze docs msg
 
 validIdentifier :: Text -> Bool
 validIdentifier name = case Text.uncons name of
   Just (c, rest) ->
     (c == '_' || c `elem` ['a' .. 'z'] || c `elem` ['A' .. 'Z'])
-      && Text.all (\x -> x `elem` ("_'-" :: String) || x `elem` ['a' .. 'z'] || x `elem` ['A' .. 'Z'] || x `elem` ['0' .. '9']) rest
-      && name `notElem` ["let", "in", "if", "then", "else", "assert", "with", "rec", "inherit", "or", "true", "false", "null"]
+      && Text.all
+        ( \x ->
+            x `elem` ("_'-" :: String)
+              || x `elem` ['a' .. 'z']
+              || x `elem` ['A' .. 'Z']
+              || x `elem` ['0' .. '9']
+        )
+        rest
+      && name
+        `notElem` [ "let",
+                    "in",
+                    "if",
+                    "then",
+                    "else",
+                    "assert",
+                    "with",
+                    "rec",
+                    "inherit",
+                    "or",
+                    "true",
+                    "false",
+                    "null"
+                  ]
   Nothing -> False
 
 -- | @textDocument/prepareRename@: the identifier range and its text, or
 -- 'Null' when the cursor is not on something renameable.
-prepareRenameDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+prepareRenameDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 prepareRenameDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   pure $ case loaded of
@@ -756,11 +881,14 @@ prepareRenameDocument readDocument analyze docs msg = do
 -- Symbols / selection --------------------------------------------------------------------
 
 -- | Hierarchical @DocumentSymbol[]@ outline.
-documentSymbolsHierarchicalDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+documentSymbolsHierarchicalDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 documentSymbolsHierarchicalDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   pure $ case loaded of
-    Right r -> toJSON (encodeSymbolTree (requestScan r) (documentSymbolTree (requestContext r)))
+    Right r ->
+      toJSON
+        (encodeSymbolTree (requestScan r) (documentSymbolTree (requestContext r)))
     Left _ -> toJSON ([] :: [Value])
 
 selectionRangeDocument :: DocumentReader -> Documents -> Value -> IO Value
@@ -784,7 +912,8 @@ selectionRangeDocument readDocument docs msg = do
 
 -- Semantic tokens ---------------------------------------------------------------------
 
-semanticTokensDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+semanticTokensDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 semanticTokensDocument readDocument analyze docs msg = do
   loaded <- loadRequest readDocument analyze docs msg
   pure $ case loaded of
@@ -795,7 +924,9 @@ semanticTokensDocument readDocument analyze docs msg = do
             Just range ->
               let startLine = maybe 0 asInt (field "start" range >>= field "line")
                   endLine = maybe maxBound asInt (field "end" range >>= field "line")
-               in filter (\t -> semanticTokenLine t >= startLine && semanticTokenLine t <= endLine) tokens
+               in filter
+                    (\t -> semanticTokenLine t >= startLine && semanticTokenLine t <= endLine)
+                    tokens
             Nothing -> tokens
        in object ["data" .= encodeSemanticTokens inRange]
 
@@ -808,7 +939,14 @@ semanticTokensDocument readDocument analyze docs msg = do
 -- it is found by re-checking with each candidate value (smallest first)
 -- replaced by an @any@-typed placeholder. Once the core reports @line:col@ for
 -- every checker error this step never runs.
-documentDiagnostics :: DocumentReader -> DocumentAnalyzer -> Documents -> FilePath -> Text -> Either String Analysis -> IO [Value]
+documentDiagnostics ::
+  DocumentReader ->
+  DocumentAnalyzer ->
+  Documents ->
+  FilePath ->
+  Text ->
+  Either String Analysis ->
+  IO [Value]
 documentDiagnostics readDocument analyze docs file content result = do
   index <- loadDeclarationIndex readDocument docs file content
   let env = completionEnvOf index
@@ -820,21 +958,29 @@ documentDiagnostics readDocument analyze docs file content result = do
         maybe True (not . ("TP" `Text.isPrefixOf`)) (errorCode (Text.pack err)) ->
           localize scan err (localizationCandidates scan)
     _ -> pure Nothing
-  pure (diagnosticValues file scan (analysisDiagnostics ctx result localized <> lintDiagnostics env ctx))
+  pure
+    ( diagnosticValues
+        file
+        scan
+        (analysisDiagnostics ctx result localized <> lintDiagnostics env ctx)
+    )
   where
     localize _ _ [] = pure Nothing
     localize scan err (candidate : rest) = do
       probe <- analyze file (replaceWithDynamic scan candidate)
       let suppressed = case probe of
             Right _ -> True
-            Left other -> other /= err && maybe True (not . ("TP" `Text.isPrefixOf`)) (errorCode (Text.pack other))
+            Left other ->
+              other /= err
+                && maybe True (not . ("TP" `Text.isPrefixOf`)) (errorCode (Text.pack other))
       if suppressed
         then pure (Just candidate)
         else localize scan err rest
 
 -- | Pull-model @textDocument/diagnostic@ report. Always analyses the current
 -- text (never the last good analysis).
-pullDiagnosticsDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+pullDiagnosticsDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 pullDiagnosticsDocument readDocument analyze docs msg = do
   let file = documentFile msg
   contentResult <- loadDocumentContent readDocument docs file
@@ -854,7 +1000,8 @@ pullDiagnosticsDocument readDocument analyze docs msg = do
 -- missing fields, "add missing field" for local attrset literals, removal or
 -- @_@-prefixing of unused bindings, and "add type signature" for
 -- unannotated @let@ bindings whose type is known.
-codeActionsDocument :: DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
+codeActionsDocument ::
+  DocumentReader -> DocumentAnalyzer -> Documents -> Value -> IO Value
 codeActionsDocument readDocument analyze docs msg = do
   legacy <- legacyCodeActionsDocument readDocument analyze docs msg
   let params = field "params" msg
@@ -866,16 +1013,38 @@ codeActionsDocument readDocument analyze docs msg = do
     (Array existing, Right r) ->
       let legacyActions = foldr (:) [] existing
           titles = mapMaybe (field "title" >=> asText) legacyActions
-          fieldDiagnostic = any (\d -> (field "code" d >>= asText) == Just "TC0009") (diagnosticPayloads msg)
-          keptLegacy = [a | a <- legacyActions, not (fieldDiagnostic && maybe False ("Replace with `" `Text.isPrefixOf`) (field "title" a >>= asText))]
+          fieldDiagnostic =
+            any
+              (\d -> (field "code" d >>= asText) == Just "TC0009")
+              (diagnosticPayloads msg)
+          keptLegacy =
+            [ a
+            | a <- legacyActions,
+              not
+                ( fieldDiagnostic
+                    && maybe False ("Replace with `" `Text.isPrefixOf`) (field "title" a >>= asText)
+                )
+            ]
           renamed = [t | t <- titles, "Replace with `" `Text.isPrefixOf` t, not fieldDiagnostic]
           extra = richCodeActions r (diagnosticPayloads msg)
-          fresh = [a | a <- extra, maybe True (\t -> t `notElem` titles && not (duplicateSuggestion renamed t)) (field "title" a >>= asText)]
+          fresh =
+            [ a
+            | a <- extra,
+              maybe
+                True
+                (\t -> t `notElem` titles && not (duplicateSuggestion renamed t))
+                (field "title" a >>= asText)
+            ]
        in toJSON (keptLegacy <> fresh)
     _ -> legacy
   where
     duplicateSuggestion renamed title =
-      any (\t -> Text.drop (Text.length "Replace with ") t == Text.dropEnd 1 (Text.drop (Text.length "Did you mean ") title)) renamed
+      any
+        ( \t ->
+            Text.drop (Text.length "Replace with ") t
+              == Text.dropEnd 1 (Text.drop (Text.length "Did you mean ") title)
+        )
+        renamed
 
 richCodeActions :: Request -> [Value] -> [Value]
 richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signatureActions
@@ -907,9 +1076,12 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
        in case (code, offsets) of
             (Just "TL0001", Just (s, _)) -> unusedActions d s
             (Just "TC0001", Just range) -> didYouMean d range message (scopeNames (fst range))
-            (Just "TC0009", Just range) -> didYouMean d range message (recordFieldNamesInMessage message) <> addMissingField d range message
+            (Just "TC0009", Just range) ->
+              didYouMean d range message (recordFieldNamesInMessage message)
+                <> addMissingField d range message
             (_, Just range)
-              | "unbound name" `Text.isInfixOf` message -> didYouMean d range message (scopeNames (fst range))
+              | "unbound name" `Text.isInfixOf` message ->
+                  didYouMean d range message (scopeNames (fst range))
             _ -> []
     scopeNames off =
       map binderName (bindersInScopeAt scan off)
@@ -918,7 +1090,12 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
     didYouMean d range message candidates =
       case quoted message of
         Just current ->
-          [ action ("Did you mean `" <> s <> "`?") "quickfix" (ix == 0) (Just d) [editOf scan range s]
+          [ action
+              ("Did you mean `" <> s <> "`?")
+              "quickfix"
+              (ix == 0)
+              (Just d)
+              [editOf scan range s]
           | (ix, s) <- zip [0 :: Int ..] (take 3 (suggestNames current candidates))
           ]
         Nothing -> []
@@ -935,17 +1112,51 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
       closer <- codeToken scan closerIx
       let (closerLine, _) = offsetToPosition idx (tokStart closer)
           closerLineStart = positionToOffset idx (closerLine, 0)
-          ownLine = blank (Text.take (tokStart closer - closerLineStart) (lineText idx closerLine))
+          ownLine =
+            blank (Text.take (tokStart closer - closerLineStart) (lineText idx closerLine))
           indent = Text.takeWhile (`elem` (" \t" :: String)) (lineText idx closerLine)
           edit
-            | ownLine = editOf scan (closerLineStart, closerLineStart) (indent <> "  " <> fieldName <> " = null;\n")
-            | otherwise = editOf scan (tokStart closer, tokStart closer) (fieldName <> " = null; ")
-      pure [action ("Add missing field `" <> fieldName <> "` to `" <> binderName b <> "`") "quickfix" False (Just d) [edit]]
+            | ownLine =
+                editOf
+                  scan
+                  (closerLineStart, closerLineStart)
+                  (indent <> "  " <> fieldName <> " = null;\n")
+            | otherwise =
+                editOf scan (tokStart closer, tokStart closer) (fieldName <> " = null; ")
+      pure
+        [ action
+            ("Add missing field `" <> fieldName <> "` to `" <> binderName b <> "`")
+            "quickfix"
+            False
+            (Just d)
+            [edit]
+        ]
     unusedActions d off = case [b | b <- unusedBinders scan, binderNameStart b == off] of
       b : _ -> case binderKind b of
-        BindParam -> [action ("Prefix `" <> binderName b <> "` with `_`") "quickfix" True (Just d) [editOf scan (binderNameStart b, binderNameStart b) "_"]]
-        BindLet -> [action ("Remove unused binding `" <> binderName b <> "`") "quickfix" True (Just d) (removeBinding b)]
-        BindPatternField -> [action ("Remove `" <> binderName b <> "` from the pattern") "quickfix" True (Just d) [editOf scan (patternFieldRange b) ""]]
+        BindParam ->
+          [ action
+              ("Prefix `" <> binderName b <> "` with `_`")
+              "quickfix"
+              True
+              (Just d)
+              [editOf scan (binderNameStart b, binderNameStart b) "_"]
+          ]
+        BindLet ->
+          [ action
+              ("Remove unused binding `" <> binderName b <> "`")
+              "quickfix"
+              True
+              (Just d)
+              (removeBinding b)
+          ]
+        BindPatternField ->
+          [ action
+              ("Remove `" <> binderName b <> "` from the pattern")
+              "quickfix"
+              True
+              (Just d)
+              [editOf scan (patternFieldRange b) ""]
+          ]
         _ -> []
       [] -> []
     removeBinding b =
@@ -969,10 +1180,21 @@ richCodeActions r diagnostics = concatMap forDiagnostic diagnostics <> signature
               | tokText t == "," ->
                   (binderNameStart b, maybe (tokEnd t) tokStart (codeToken scan (endIx + 1)))
             _ -> case codeToken scan (i - 1) of
-              Just prev | tokText prev == "," -> (tokStart prev, maybe (binderNameEnd b) tokEnd (codeToken scan (endIx - 1)))
+              Just prev
+                | tokText prev == "," ->
+                    (tokStart prev, maybe (binderNameEnd b) tokEnd (codeToken scan (endIx - 1)))
               _ -> (binderNameStart b, binderNameEnd b)
     signatureActions =
-      [ action ("Add type signature `" <> binderName b <> " :: " <> rendered <> "`") "refactor.rewrite" False Nothing [editOf scan (lineStart, lineStart) (indent <> binderName b <> " :: " <> rendered <> ";\n")]
+      [ action
+          ("Add type signature `" <> binderName b <> " :: " <> rendered <> "`")
+          "refactor.rewrite"
+          False
+          Nothing
+          [ editOf
+              scan
+              (lineStart, lineStart)
+              (indent <> binderName b <> " :: " <> rendered <> ";\n")
+          ]
       | b <- scanBinders scan,
         binderKind b == BindLet,
         isNothing (binderSignature b),

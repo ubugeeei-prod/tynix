@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Document-link provider for the tynix LSP.
@@ -32,7 +33,13 @@ import Data.Char (isAlphaNum, isDigit, isLetter)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Server (pathUri, textRangeToUtf16Columns)
-import System.FilePath (isAbsolute, joinPath, normalise, splitDirectories, (</>))
+import System.FilePath
+  ( isAbsolute,
+    joinPath,
+    normalise,
+    splitDirectories,
+    (</>),
+  )
 
 -- | Internal document-link value type.
 --
@@ -58,10 +65,15 @@ encodeDocumentLink baseDir link =
   object
     [ "range"
         .= object
-          [ "start" .= object ["line" .= documentLinkLine link, "character" .= documentLinkStartChar link],
-            "end" .= object ["line" .= documentLinkLine link, "character" .= documentLinkEndChar link]
+          [ "start"
+              .= object
+                ["line" .= documentLinkLine link, "character" .= documentLinkStartChar link],
+            "end"
+              .= object
+                ["line" .= documentLinkLine link, "character" .= documentLinkEndChar link]
           ],
-      "target" .= pathUri (resolveLinkTarget baseDir (Text.unpack (documentLinkPath link)))
+      "target"
+        .= pathUri (resolveLinkTarget baseDir (Text.unpack (documentLinkPath link)))
     ]
 
 -- | Combine a base directory with a possibly-relative link path. Absolute
@@ -119,21 +131,20 @@ scanLine (lineNo, line) = go 0 False False []
                       go (ix + 1) inDQuote False acc
                 _
                   | isKeywordAt "import" line ix ->
-                      case scanPathLiteralAt line (ix + 6) of
-                        Just (pathStart, pathEnd, pathText) ->
-                          let (sc, ec) = textRangeToUtf16Columns line pathStart pathEnd
-                           in go pathEnd inDQuote False (DocumentLink lineNo sc ec pathText : acc)
-                        Nothing -> go (ix + 6) inDQuote False acc
+                      resumeLink inDQuote (ix + 6) acc (scanPathLiteralAt line (ix + 6))
                   | isKeywordAt "declare" line ix ->
-                      case scanQuotedStringAt line (ix + 7) of
-                        Just (pathStart, pathEnd, pathText) ->
-                          let (sc, ec) = textRangeToUtf16Columns line pathStart pathEnd
-                           in go pathEnd inDQuote False (DocumentLink lineNo sc ec pathText : acc)
-                        Nothing -> go (ix + 7) inDQuote False acc
+                      resumeLink inDQuote (ix + 7) acc (scanQuotedStringAt line (ix + 7))
                   | isIdentChar c ->
                       let identLen = Text.length (Text.takeWhile isIdentChar (Text.drop ix line))
                        in go (ix + identLen) inDQuote False acc
                   | otherwise -> go (ix + 1) inDQuote False acc
+
+    resumeLink inDQuote next acc = \case
+      Just (pathStart, pathEnd, pathText) ->
+        let (startColumn, endColumn) = textRangeToUtf16Columns line pathStart pathEnd
+            link = DocumentLink lineNo startColumn endColumn pathText
+         in go pathEnd inDQuote False (link : acc)
+      Nothing -> go next inDQuote False acc
 
 -- | True when @line@ contains @keyword@ at position @ix@ with a word
 -- boundary on the right (start-of-line on the left is guaranteed by the

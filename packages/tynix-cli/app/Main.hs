@@ -42,14 +42,16 @@ main = do
 -- | Execute one CLI command.
 run :: Cli.Command -> IO ()
 run (Cli.Version format) =
-  putPayload (Cli.renderVersion (Text.pack (showVersion PackageInfo.version)) format)
+  putPayload
+    (Cli.renderVersion (Text.pack (showVersion PackageInfo.version)) format)
 run (Cli.Lsp logFile) =
   callProcess "tynix-lsp" (Cli.lspCommandArgs logFile)
 run (Cli.Doctor format) = do
   tty <- hIsTerminalDevice stdout
   noColor <- lookupEnv "NO_COLOR"
   let color = tty && maybe True null noColor
-  (ok, report) <- Cli.runDoctor (Text.pack (showVersion PackageInfo.version)) color format
+  (ok, report) <-
+    Cli.runDoctor (Text.pack (showVersion PackageInfo.version)) color format
   putPayload report
   unless ok exitFailure
 run cmd =

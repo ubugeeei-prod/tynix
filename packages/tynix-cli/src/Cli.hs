@@ -28,8 +28,28 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.IO qualified as TextIO
 import Doctor (doctorChecks, doctorSucceeded, renderDoctor, renderDoctorJson)
-import Driver (Analysis (..), SupportCache, analyzeFile, analyzeFileWith, compileFile, compileFileUnchecked, compileFileWith, emitFile, emitFileAsWith, newSupportCache)
-import Ide (Editor (..), InstallOptions (..), Scope (..), defaultIdeEnv, defaultInstallOptions, editorFromName, listEditors, runInstall)
+import Driver
+  ( Analysis (..),
+    SupportCache,
+    analyzeFile,
+    analyzeFileWith,
+    compileFile,
+    compileFileUnchecked,
+    compileFileWith,
+    emitFile,
+    emitFileAsWith,
+    newSupportCache,
+  )
+import Ide
+  ( Editor (..),
+    InstallOptions (..),
+    Scope (..),
+    defaultIdeEnv,
+    defaultInstallOptions,
+    editorFromName,
+    listEditors,
+    runInstall,
+  )
 import Options.Applicative
 import Pretty (renderScheme)
 import Project
@@ -60,7 +80,8 @@ data Command
 
 data PlannedWrite = PlannedWrite FilePath Text
 
-type ProjectOutputPlan = (ProjectSource, FilePath, FilePath, Either String [PlannedWrite])
+type ProjectOutputPlan =
+  (ProjectSource, FilePath, FilePath, Either String [PlannedWrite])
 
 -- | Command-line parser definition.
 commandParser :: Parser Command
@@ -69,15 +90,37 @@ commandParser =
     ( command "compile" (info compileP (progDesc "Compile .tynix to .nix"))
         <> command "check" (info checkP (progDesc "Type-check a .tynix file"))
         <> command "emit" (info emitP (progDesc "Emit a .d.tynix declaration file"))
-        <> command "init" (info initP (progDesc "Create tynix.config.tynix and starter files"))
-        <> command "scaffold" (info scaffoldP (progDesc "Create project files from tynix.config.tynix"))
-        <> command "check-project" (info checkProjectP (progDesc "Type-check every discovered project source file"))
-        <> command "build" (info buildProjectP (progDesc "Compile project sources and emit generated declarations"))
-        <> command "emit-project" (info emitProjectP (progDesc "Emit declaration files for every discovered project source file"))
+        <> command
+          "init"
+          (info initP (progDesc "Create tynix.config.tynix and starter files"))
+        <> command
+          "scaffold"
+          (info scaffoldP (progDesc "Create project files from tynix.config.tynix"))
+        <> command
+          "check-project"
+          (info checkProjectP (progDesc "Type-check every discovered project source file"))
+        <> command
+          "build"
+          ( info
+              buildProjectP
+              (progDesc "Compile project sources and emit generated declarations")
+          )
+        <> command
+          "emit-project"
+          ( info
+              emitProjectP
+              (progDesc "Emit declaration files for every discovered project source file")
+          )
         <> command "version" (info versionP (progDesc "Show the tynix version"))
-        <> command "lsp" (info lspP (progDesc "Launch the tynix language server over stdio"))
-        <> command "ide" (info ideP (progDesc "Set up editor integrations (install, list)"))
-        <> command "doctor" (info doctorP (progDesc "Check the tynix toolchain, project, and editor setup"))
+        <> command
+          "lsp"
+          (info lspP (progDesc "Launch the tynix language server over stdio"))
+        <> command
+          "ide"
+          (info ideP (progDesc "Set up editor integrations (install, list)"))
+        <> command
+          "doctor"
+          (info doctorP (progDesc "Check the tynix toolchain, project, and editor setup"))
     )
   where
     fileArg = strArgument (metavar "FILE")
@@ -96,7 +139,10 @@ commandParser =
       Compile
         <$> fileArg
         <*> outputOpt
-        <*> switch (long "no-check" <> help "Erase types without type-checking (parse errors still fail)")
+        <*> switch
+          ( long "no-check"
+              <> help "Erase types without type-checking (parse errors still fail)"
+          )
     checkP = Check <$> fileArg <*> formatOpt
     emitP = Emit <$> fileArg <*> outputOpt
     initP =
@@ -118,8 +164,18 @@ commandParser =
     lspP = Lsp <$> optional (strOption (long "log-file" <> metavar "PATH"))
     ideP =
       hsubparser
-        ( command "install" (info (IdeInstall <$> ideInstallParser) (progDesc "Install the tynix extension and write editor config"))
-            <> command "list" (info (pure IdeList) (progDesc "List supported editors and whether they are detected"))
+        ( command
+            "install"
+            ( info
+                (IdeInstall <$> ideInstallParser)
+                (progDesc "Install the tynix extension and write editor config")
+            )
+            <> command
+              "list"
+              ( info
+                  (pure IdeList)
+                  (progDesc "List supported editors and whether they are detected")
+              )
         )
     doctorP = Doctor <$> formatOpt
 
@@ -129,20 +185,45 @@ ideInstallParser =
   InstallOptions
     <$> argument editorReader (metavar "vscode|cursor|vscodium|zed|neovim|helix")
     <*> scopeP
-    <*> switch (long "dry-run" <> short 'n' <> help "Print the planned changes without touching anything")
-    <*> (not <$> switch (long "no-extension" <> help "Only write config; skip installing the editor extension"))
-    <*> switch (long "force" <> help "Rewrite files that cannot be merged safely, keeping a .bak backup")
+    <*> switch
+      ( long "dry-run"
+          <> short 'n'
+          <> help "Print the planned changes without touching anything"
+      )
+    <*> ( not
+            <$> switch
+              ( long "no-extension"
+                  <> help "Only write config; skip installing the editor extension"
+              )
+        )
+    <*> switch
+      ( long "force"
+          <> help "Rewrite files that cannot be merged safely, keeping a .bak backup"
+      )
     <*> optional
       ( strOption
           ( long "lsp-path"
               <> metavar "PATH"
-              <> help "tynix-lsp path to pin in editor settings (default: resolved from PATH; \"\" to leave unset)"
+              <> help
+                "tynix-lsp path to pin in editor settings (default: resolved from \
+                \PATH; \"\" to leave unset)"
           )
       )
   where
     scopeP =
-      (ProjectScope <$> strOption (long "project" <> metavar "DIR" <> help "Write project settings under DIR (default: current directory)"))
-        <|> flag' GlobalScope (long "global" <> short 'g' <> help "Write user-level settings instead of project settings")
+      ( ProjectScope
+          <$> strOption
+            ( long "project"
+                <> metavar "DIR"
+                <> help "Write project settings under DIR (default: current directory)"
+            )
+      )
+        <|> flag'
+          GlobalScope
+          ( long "global"
+              <> short 'g'
+              <> help "Write user-level settings instead of project settings"
+          )
         <|> pure DefaultScope
 
 editorReader :: ReadM Editor
@@ -238,7 +319,8 @@ initWithEditors target editors = do
             (_, Nothing) -> DefaultScope
       result <- runInstall env ((defaultInstallOptions editor){installScope = scope})
       case result of
-        Left err -> pure (Left (Text.unpack (Text.intercalate "\n" (reverse acc)) <> "\n" <> err))
+        Left err ->
+          pure (Left (Text.unpack (Text.intercalate "\n" (reverse acc)) <> "\n" <> err))
         Right report -> go (report : acc) rest
 
 -- | Pretty-print the inferred root and bindings for `tynix check`.
@@ -246,7 +328,9 @@ renderAnalysis :: Analysis -> Text
 renderAnalysis analysis =
   Text.unlines $
     maybe [] (\root -> ["root: " <> renderScheme root]) (analysisRoot analysis)
-      <> [name <> " :: " <> renderScheme scheme | (name, scheme) <- Map.toList (analysisBindings analysis)]
+      <> [ name <> " :: " <> renderScheme scheme
+         | (name, scheme) <- Map.toList (analysisBindings analysis)
+         ]
 
 -- | Render the CLI version in the same text/json formats used by reports.
 renderVersion :: Text -> OutputFormat -> Text
@@ -284,10 +368,19 @@ executeProjectCheck target format = do
     Right config -> do
       sources <- discoverProjectSources config
       if null sources
-        then pure (renderedFailure format (projectErrorJson "check" (Just config) "no project source files discovered") "no project source files discovered")
+        then
+          pure
+            ( renderedFailure
+                format
+                (projectErrorJson "check" (Just config) "no project source files discovered")
+                "no project source files discovered"
+            )
         else do
           cache <- newSupportCache
-          entries <- traverse (\source -> (source,) <$> analyzeFileWith cache (projectSourcePath source)) sources
+          entries <-
+            traverse
+              (\source -> (source,) <$> analyzeFileWith cache (projectSourcePath source))
+              sources
           pure (renderProjectCheck format config entries)
 
 executeProjectBuild :: Maybe FilePath -> OutputFormat -> IO (Either String Text)
@@ -298,7 +391,13 @@ executeProjectBuild target format = do
     Right config -> do
       sources <- discoverProjectSources config
       if null sources
-        then pure (renderedFailure format (projectErrorJson "build" (Just config) "no project source files discovered") "no project source files discovered")
+        then
+          pure
+            ( renderedFailure
+                format
+                (projectErrorJson "build" (Just config) "no project source files discovered")
+                "no project source files discovered"
+            )
         else do
           cache <- newSupportCache
           plans <- traverse (planBuildOne cache config) sources
@@ -312,11 +411,22 @@ executeProjectEmit :: Maybe FilePath -> OutputFormat -> IO (Either String Text)
 executeProjectEmit target format = do
   configResult <- loadProject target
   case configResult of
-    Left err -> pure (renderedFailure format (projectErrorJson "emit-project" Nothing err) err)
+    Left err ->
+      pure (renderedFailure format (projectErrorJson "emit-project" Nothing err) err)
     Right config -> do
       sources <- discoverProjectSources config
       if null sources
-        then pure (renderedFailure format (projectErrorJson "emit-project" (Just config) "no project source files discovered") "no project source files discovered")
+        then
+          pure
+            ( renderedFailure
+                format
+                ( projectErrorJson
+                    "emit-project"
+                    (Just config)
+                    "no project source files discovered"
+                )
+                "no project source files discovered"
+            )
         else do
           cache <- newSupportCache
           plans <- traverse (planEmitOne cache config) sources
@@ -326,39 +436,38 @@ executeProjectEmit target format = do
               writeOutputPlans plans
               pure (Right report)
 
-renderSingleCheck :: FilePath -> OutputFormat -> Either String Analysis -> Either String Text
+renderSingleCheck ::
+  FilePath -> OutputFormat -> Either String Analysis -> Either String Text
 renderSingleCheck input format result =
-  case format of
-    TextFormat -> fmap renderAnalysis result
-    JsonFormat ->
-      case result of
-        Left err ->
-          Left $
-            Text.unpack $
-              jsonText $
-                object
-                  [ "schemaVersion" .= cliSchemaVersion,
-                    "action" .= ("check" :: Text),
-                    "file" .= input,
-                    "success" .= False,
-                    "root" .= (Nothing :: Maybe Text),
-                    "bindings" .= (Map.empty :: Map.Map Text Text),
-                    "error" .= err
-                  ]
-        Right analysis ->
-          Right $
-            jsonText $
-              object
-                [ "schemaVersion" .= cliSchemaVersion,
-                  "action" .= ("check" :: Text),
-                  "file" .= input,
-                  "success" .= True,
-                  "root" .= fmap renderScheme (analysisRoot analysis),
-                  "bindings" .= Map.map renderScheme (analysisBindings analysis),
-                  "error" .= (Nothing :: Maybe Text)
-                ]
+  case (format, result) of
+    (TextFormat, _) -> fmap renderAnalysis result
+    (JsonFormat, Left _) -> Left (Text.unpack rendered)
+    (JsonFormat, Right _) -> Right rendered
+  where
+    rendered = jsonText (object (commonFields <> either failureFields successFields result))
+    commonFields =
+      [ "schemaVersion" .= cliSchemaVersion,
+        "action" .= ("check" :: Text),
+        "file" .= input
+      ]
+    failureFields err =
+      [ "success" .= False,
+        "root" .= (Nothing :: Maybe Text),
+        "bindings" .= (Map.empty :: Map.Map Text Text),
+        "error" .= err
+      ]
+    successFields analysis =
+      [ "success" .= True,
+        "root" .= fmap renderScheme (analysisRoot analysis),
+        "bindings" .= Map.map renderScheme (analysisBindings analysis),
+        "error" .= (Nothing :: Maybe Text)
+      ]
 
-renderProjectCheck :: OutputFormat -> ProjectConfig -> [(ProjectSource, Either String Analysis)] -> Either String Text
+renderProjectCheck ::
+  OutputFormat ->
+  ProjectConfig ->
+  [(ProjectSource, Either String Analysis)] ->
+  Either String Text
 renderProjectCheck format config entries =
   if any (either (const True) (const False) . snd) entries
     then renderedFailure format payload (Text.unpack textReport)
@@ -391,11 +500,13 @@ renderProjectCheck format config entries =
           "relative" .= projectSourceRelative source,
           "success" .= either (const False) (const True) result,
           "root" .= either (const Nothing) (fmap renderScheme . analysisRoot) result,
-          "bindings" .= either (const Map.empty) (Map.map renderScheme . analysisBindings) result,
+          "bindings"
+            .= either (const Map.empty) (Map.map renderScheme . analysisBindings) result,
           "error" .= either Just (const Nothing) result
         ]
 
-planBuildOne :: SupportCache -> ProjectConfig -> ProjectSource -> IO ProjectOutputPlan
+planBuildOne ::
+  SupportCache -> ProjectConfig -> ProjectSource -> IO ProjectOutputPlan
 planBuildOne cache config source = do
   let runtimeOutput = projectBuildOutputPath config source
       declarationOutput = projectDeclarationOutputPath config source
@@ -403,37 +514,63 @@ planBuildOne cache config source = do
   case compileResult of
     Left err -> pure (source, runtimeOutput, declarationOutput, Left err)
     Right compiled -> do
-      emitResult <- emitFileAsWith cache (projectSourcePath source) runtimeOutput declarationOutput
+      emitResult <-
+        emitFileAsWith cache (projectSourcePath source) runtimeOutput declarationOutput
       case emitResult of
         Left err -> pure (source, runtimeOutput, declarationOutput, Left err)
         Right declaration ->
-          pure (source, runtimeOutput, declarationOutput, Right [PlannedWrite runtimeOutput compiled, PlannedWrite declarationOutput declaration])
+          pure
+            ( source,
+              runtimeOutput,
+              declarationOutput,
+              Right
+                [ PlannedWrite runtimeOutput compiled,
+                  PlannedWrite declarationOutput declaration
+                ]
+            )
 
-planEmitOne :: SupportCache -> ProjectConfig -> ProjectSource -> IO ProjectOutputPlan
+planEmitOne ::
+  SupportCache -> ProjectConfig -> ProjectSource -> IO ProjectOutputPlan
 planEmitOne cache config source = do
   let runtimeOutput = projectBuildOutputPath config source
       declarationOutput = projectDeclarationOutputPath config source
-  result <- emitFileAsWith cache (projectSourcePath source) runtimeOutput declarationOutput
+  result <-
+    emitFileAsWith cache (projectSourcePath source) runtimeOutput declarationOutput
   case result of
     Left err -> pure (source, runtimeOutput, declarationOutput, Left err)
     Right declaration ->
-      pure (source, runtimeOutput, declarationOutput, Right [PlannedWrite declarationOutput declaration])
+      pure
+        ( source,
+          runtimeOutput,
+          declarationOutput,
+          Right [PlannedWrite declarationOutput declaration]
+        )
 
-reportEntries :: [ProjectOutputPlan] -> [(ProjectSource, FilePath, FilePath, Either String ())]
+reportEntries ::
+  [ProjectOutputPlan] -> [(ProjectSource, FilePath, FilePath, Either String ())]
 reportEntries =
-  map (\(source, runtimeOutput, declarationOutput, result) -> (source, runtimeOutput, declarationOutput, void result))
+  map
+    ( \(source, runtimeOutput, declarationOutput, result) -> (source, runtimeOutput, declarationOutput, void result)
+    )
 
 writeOutputPlans :: [ProjectOutputPlan] -> IO ()
 writeOutputPlans plans =
   if any (either (const True) (const False) . fourth) plans
     then pure ()
-    else mapM_ writePlannedWrite [planned | (_, _, _, Right plannedWrites) <- plans, planned <- plannedWrites]
+    else
+      mapM_
+        writePlannedWrite
+        [planned | (_, _, _, Right plannedWrites) <- plans, planned <- plannedWrites]
 
 writePlannedWrite :: PlannedWrite -> IO ()
 writePlannedWrite (PlannedWrite path content) =
   writeTextFile path content
 
-renderProjectBuild :: OutputFormat -> ProjectConfig -> [(ProjectSource, FilePath, FilePath, Either String ())] -> Either String Text
+renderProjectBuild ::
+  OutputFormat ->
+  ProjectConfig ->
+  [(ProjectSource, FilePath, FilePath, Either String ())] ->
+  Either String Text
 renderProjectBuild format config entries =
   if any (either (const True) (const False) . fourth) entries
     then renderedFailure format payload (Text.unpack textReport)
@@ -473,7 +610,11 @@ renderProjectBuild format config entries =
           "error" .= either Just (const Nothing) result
         ]
 
-renderProjectEmit :: OutputFormat -> ProjectConfig -> [(ProjectSource, FilePath, FilePath, Either String ())] -> Either String Text
+renderProjectEmit ::
+  OutputFormat ->
+  ProjectConfig ->
+  [(ProjectSource, FilePath, FilePath, Either String ())] ->
+  Either String Text
 renderProjectEmit format config entries =
   if any (either (const True) (const False) . fourth) entries
     then renderedFailure format payload (Text.unpack textReport)
@@ -518,7 +659,8 @@ summaryJson entries =
       "failed" .= length [() | (_, Left _) <- entries]
     ]
 
-buildSummaryJson :: [(ProjectSource, FilePath, FilePath, Either String ())] -> Value
+buildSummaryJson ::
+  [(ProjectSource, FilePath, FilePath, Either String ())] -> Value
 buildSummaryJson entries =
   object
     [ "total" .= length entries,

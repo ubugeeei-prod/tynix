@@ -21,6 +21,7 @@
     "@ox-content/vite-plugin": "3.2.13",
     "@shikijs/core": "4.1.0",
     "@shikijs/engine-javascript": "4.1.0",
+    "prettier": "^3.9.9",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
     "vite-plus": "^1.0.0"
   }

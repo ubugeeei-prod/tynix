@@ -61,10 +61,16 @@ function place(p: Point, arm: number): Point {
   return [C + rx, C + ry];
 }
 
-const arms: Point[][][] = [0, 1, 2, 3, 4, 5].map((arm) => lambda().map((leg) => leg.map((p) => place(p, arm))));
+const arms: Point[][][] = [0, 1, 2, 3, 4, 5].map((arm) =>
+  lambda().map((leg) => leg.map((p) => place(p, arm))),
+);
 
 function d(points: Point[]): string {
-  return "M" + points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(" L") + " Z";
+  return (
+    "M" +
+    points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(" L") +
+    " Z"
+  );
 }
 
 function colon(cx: number, cy: number, fill: string): string {
@@ -95,27 +101,48 @@ function wedge([a0, a1]: [number, number]): string {
 }
 
 /** The mark as a group filling a 512 x 512 box with `margin` on each side. */
-function markGroup(colors: string[], colonFill: string, margin: number, id: string): string {
+function markGroup(
+  colors: string[],
+  colonFill: string,
+  margin: number,
+  id: string,
+): string {
   const all = arms.flat(2);
   const xs = all.map(([x]) => x);
   const ys = all.map(([, y]) => y);
-  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const span = Math.max(
+    Math.max(...xs) - Math.min(...xs),
+    Math.max(...ys) - Math.min(...ys),
+  );
   const scale = (512 - 2 * margin) / span;
   const cx = (Math.max(...xs) + Math.min(...xs)) / 2;
   const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
-  const legs = arms.map((arm, k) => arm.map((leg) => `<path d="${d(leg)}" fill="${colors[k]}"/>`).join("")).join("");
+  const legs = arms
+    .map((arm, k) =>
+      arm.map((leg) => `<path d="${d(leg)}" fill="${colors[k]}"/>`).join(""),
+    )
+    .join("");
   // Every lambda lies on the previous one; painting in order gets that right
   // except where the first meets the last, so the first is repainted there.
-  const first = arms[0].map((leg) => `<path d="${d(leg)}" fill="${colors[0]}"/>`).join("");
+  const first = arms[0]
+    .map((leg) => `<path d="${d(leg)}" fill="${colors[0]}"/>`)
+    .join("");
   const weave = `<clipPath id="${id}-weave"><path d="${wedge(WEAVE)}"/></clipPath><g clip-path="url(#${id}-weave)">${first}</g>`;
   return `<g transform="translate(256 256) scale(${scale.toFixed(4)}) translate(${(-cx).toFixed(2)} ${(-cy).toFixed(2)})">${legs}${weave}${colon(cx, cy, colonFill)}</g>`;
 }
 
-function svg(body: string, viewBox: string, width: number, height: number, title = "tynix"): string {
+function svg(
+  body: string,
+  viewBox: string,
+  width: number,
+  height: number,
+  title = "tynix",
+): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${width}" height="${height}" role="img" aria-label="${title}">\n  <title>${title}</title>\n  ${body}\n</svg>\n`;
 }
 
-const mark = (colors: string[], colonFill = AMBER, id = "tynix") => markGroup(colors, colonFill, 16, id);
+const mark = (colors: string[], colonFill = AMBER, id = "tynix") =>
+  markGroup(colors, colonFill, 16, id);
 const tile = (id: string) =>
   `<rect width="512" height="512" rx="116" fill="${TILE}"/>${markGroup(palettes.dark, AMBER, 76, id)}`;
 
@@ -137,17 +164,63 @@ function wordmark(color: string): string {
 const logoMark = (inner: string) => `<g transform="scale(0.125)">${inner}</g>`;
 
 const files: Record<string, string> = {
-  "docs/public/brand/tynix-mark.svg": svg(mark(palettes.light, AMBER, "m"), "0 0 512 512", 64, 64),
-  "docs/public/brand/tynix-mark-dark.svg": svg(mark(palettes.dark, AMBER, "md"), "0 0 512 512", 64, 64),
-  "docs/public/brand/tynix-mark-mono.svg": svg(mark(Array(6).fill(INK), INK, "mm"), "0 0 512 512", 64, 64),
-  "docs/public/brand/tynix-mark-white.svg": svg(mark(Array(6).fill("#FFFFFF"), "#FFFFFF", "mw"), "0 0 512 512", 64, 64),
-  "docs/public/brand/tynix-app-icon.svg": svg(tile("ai"), "0 0 512 512", 512, 512),
-  "docs/public/brand/tynix-wordmark.svg": svg(wordmark(INK), `74 0 ${LOGO_WIDTH - 74} 64`, (LOGO_WIDTH - 74) * 2, 128),
-  "docs/public/brand/tynix-logo.svg": svg(logoMark(mark(palettes.light, AMBER, "l")) + wordmark(INK), `0 0 ${LOGO_WIDTH} 64`, LOGO_WIDTH * 2, 128),
-  "docs/public/brand/tynix-logo-dark.svg": svg(logoMark(mark(palettes.dark, AMBER, "ld")) + wordmark("#F4F7FC"), `0 0 ${LOGO_WIDTH} 64`, LOGO_WIDTH * 2, 128),
-  "docs/public/brand/tynix-logo-mono.svg": svg(logoMark(mark(Array(6).fill(INK), INK, "lm")) + wordmark(INK), `0 0 ${LOGO_WIDTH} 64`, LOGO_WIDTH * 2, 128),
+  "docs/public/brand/tynix-mark.svg": svg(
+    mark(palettes.light, AMBER, "m"),
+    "0 0 512 512",
+    64,
+    64,
+  ),
+  "docs/public/brand/tynix-mark-dark.svg": svg(
+    mark(palettes.dark, AMBER, "md"),
+    "0 0 512 512",
+    64,
+    64,
+  ),
+  "docs/public/brand/tynix-mark-mono.svg": svg(
+    mark(Array(6).fill(INK), INK, "mm"),
+    "0 0 512 512",
+    64,
+    64,
+  ),
+  "docs/public/brand/tynix-mark-white.svg": svg(
+    mark(Array(6).fill("#FFFFFF"), "#FFFFFF", "mw"),
+    "0 0 512 512",
+    64,
+    64,
+  ),
+  "docs/public/brand/tynix-app-icon.svg": svg(
+    tile("ai"),
+    "0 0 512 512",
+    512,
+    512,
+  ),
+  "docs/public/brand/tynix-wordmark.svg": svg(
+    wordmark(INK),
+    `74 0 ${LOGO_WIDTH - 74} 64`,
+    (LOGO_WIDTH - 74) * 2,
+    128,
+  ),
+  "docs/public/brand/tynix-logo.svg": svg(
+    logoMark(mark(palettes.light, AMBER, "l")) + wordmark(INK),
+    `0 0 ${LOGO_WIDTH} 64`,
+    LOGO_WIDTH * 2,
+    128,
+  ),
+  "docs/public/brand/tynix-logo-dark.svg": svg(
+    logoMark(mark(palettes.dark, AMBER, "ld")) + wordmark("#F4F7FC"),
+    `0 0 ${LOGO_WIDTH} 64`,
+    LOGO_WIDTH * 2,
+    128,
+  ),
+  "docs/public/brand/tynix-logo-mono.svg": svg(
+    logoMark(mark(Array(6).fill(INK), INK, "lm")) + wordmark(INK),
+    `0 0 ${LOGO_WIDTH} 64`,
+    LOGO_WIDTH * 2,
+    128,
+  ),
   "docs/public/brand/tynix-logo-white.svg": svg(
-    logoMark(mark(Array(6).fill("#FFFFFF"), "#FFFFFF", "lw")) + wordmark("#FFFFFF"),
+    logoMark(mark(Array(6).fill("#FFFFFF"), "#FFFFFF", "lw")) +
+      wordmark("#FFFFFF"),
     `0 0 ${LOGO_WIDTH} 64`,
     LOGO_WIDTH * 2,
     128,
@@ -157,8 +230,18 @@ const files: Record<string, string> = {
   "docs/public/tynix-logo.svg": svg(tile("h"), "0 0 512 512", 64, 64),
   "docs/public/favicon.svg": svg(tile("f"), "0 0 512 512", 64, 64),
   "editors/vscode/icons/icon.svg": svg(tile("v"), "0 0 512 512", 256, 256),
-  "editors/vscode/icons/tynix-file-light.svg": svg(mark(palettes.light, "#C98A12", "fl"), "0 0 512 512", 16, 16),
-  "editors/vscode/icons/tynix-file-dark.svg": svg(mark(palettes.dark, AMBER, "fd"), "0 0 512 512", 16, 16),
+  "editors/vscode/icons/tynix-file-light.svg": svg(
+    mark(palettes.light, "#C98A12", "fl"),
+    "0 0 512 512",
+    16,
+    16,
+  ),
+  "editors/vscode/icons/tynix-file-dark.svg": svg(
+    mark(palettes.dark, AMBER, "fd"),
+    "0 0 512 512",
+    16,
+    16,
+  ),
 };
 
 for (const [path, content] of Object.entries(files)) {
@@ -176,16 +259,38 @@ writeFileSync(ogPath, og);
 console.log("wrote docs/public/brand/og-image.svg");
 
 function render(source: string, target: string, width: number): void {
-  execFileSync("rsvg-convert", ["-w", String(width), root + source, "-o", root + target]);
+  execFileSync("rsvg-convert", [
+    "-w",
+    String(width),
+    root + source,
+    "-o",
+    root + target,
+  ]);
   console.log(`rendered ${target}`);
 }
 
 try {
   execFileSync("rsvg-convert", ["--version"], { stdio: "ignore" });
-  render("docs/public/brand/tynix-app-icon.svg", "docs/public/brand/tynix-mark-512.png", 512);
-  render("docs/public/brand/tynix-app-icon.svg", "docs/public/apple-touch-icon.png", 180);
-  render("docs/public/brand/tynix-app-icon.svg", "editors/vscode/images/icon.png", 256);
-  render("docs/public/brand/og-image.svg", "docs/public/brand/og-image.png", 1200);
+  render(
+    "docs/public/brand/tynix-app-icon.svg",
+    "docs/public/brand/tynix-mark-512.png",
+    512,
+  );
+  render(
+    "docs/public/brand/tynix-app-icon.svg",
+    "docs/public/apple-touch-icon.png",
+    180,
+  );
+  render(
+    "docs/public/brand/tynix-app-icon.svg",
+    "editors/vscode/images/icon.png",
+    256,
+  );
+  render(
+    "docs/public/brand/og-image.svg",
+    "docs/public/brand/og-image.png",
+    1200,
+  );
   render("docs/public/brand/og-image.svg", "docs/public/og-image.png", 1200);
 } catch {
   console.warn("rsvg-convert not found: PNG assets were not re-rendered");

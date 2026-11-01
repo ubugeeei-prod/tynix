@@ -67,30 +67,44 @@ spec = do
       sources <- packageSources
       bodies <- forM sources Text.readFile
       let mentioned constructor = any (Text.isInfixOf constructor) bodies
-          missing = [show code | code <- allDiagnosticCodes, not (mentioned (Text.pack (show code)))]
+          missing =
+            [ show code | code <- allDiagnosticCodes, not (mentioned (Text.pack (show code)))
+            ]
       missing `shouldBe` []
 
   describe "emitted messages" $ do
     it "tags parser directive failures" $ do
-      expectCode "TP0001" (parseFailure (source ["let x = 1; in x", "# @tynix-ignore"]))
+      expectCode
+        "TP0001"
+        (parseFailure (source ["let x = 1; in x", "# @tynix-ignore"]))
       expectCode
         "TP0002"
-        (parseFailure (source ["# @tynix-ignore", "# @tynix-expected", "let x = 1; in x"]))
+        ( parseFailure
+            (source ["# @tynix-ignore", "# @tynix-expected", "let x = 1; in x"])
+        )
 
     it "tags plain syntax errors" $
       expectCode "TP0004" (parseFailure "let x = ;")
 
     it "tags kind mismatches" $ do
-      expectCodeIn "TK0001" (inferAliasKinds [plainAlias "Bad" ["a"] (TApp tInt (TVar "a"))])
+      expectCodeIn
+        "TK0001"
+        (inferAliasKinds [plainAlias "Bad" ["a"] (TApp tInt (TVar "a"))])
       expectCodeIn "TK0001" (inferTypeKind mempty (TApp (tList tInt) tString))
 
     it "tags the kind occurs check" $
-      expectCodeIn "TK0002" (inferAliasKinds [plainAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))])
+      expectCodeIn
+        "TK0002"
+        (inferAliasKinds [plainAlias "Loop" ["f"] (TApp (TVar "f") (TVar "f"))])
 
     it "tags term annotations that do not resolve to Type" $ do
       program <-
-        either (\err -> expectationFailure (Text.unpack err) >> fail "parse failed") pure $
-          parseProgram "kinds.tynix" (source ["let value :: List;", "    value = [];", "in value"])
+        either
+          (\err -> expectationFailure (Text.unpack err) >> fail "parse failed")
+          pure
+          $ parseProgram
+            "kinds.tynix"
+            (source ["let value :: List;", "    value = [];", "in value"])
       expectCodeIn "TK0003" (validateProgramKinds (programAliases program) program)
 
     it "tags type-checker failures" $

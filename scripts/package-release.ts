@@ -1,7 +1,21 @@
-import { chmodSync, copyFileSync, createReadStream, mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  createReadStream,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { tmpdir } from "node:os";
 import { capture, printUsage, run, rootDir } from "./utils.ts";
 
@@ -41,9 +55,15 @@ function printHelp(): void {
   ]);
 }
 
-function resolveArchivePath(checksumPath: string, archiveName: string, lineNumber: number): string {
+function resolveArchivePath(
+  checksumPath: string,
+  archiveName: string,
+  lineNumber: number,
+): string {
   if (isAbsolute(archiveName)) {
-    throw new Error(`${checksumPath}:${lineNumber}: archive path must be relative`);
+    throw new Error(
+      `${checksumPath}:${lineNumber}: archive path must be relative`,
+    );
   }
 
   const checksumDir = dirname(checksumPath);
@@ -64,7 +84,10 @@ function resolveArchivePath(checksumPath: string, archiveName: string, lineNumbe
   return archivePath;
 }
 
-function parseChecksumEntries(checksumPath: string, contents: string): ChecksumEntry[] {
+function parseChecksumEntries(
+  checksumPath: string,
+  contents: string,
+): ChecksumEntry[] {
   const entries: ChecksumEntry[] = [];
   const lines = contents.split("\n");
 
@@ -78,12 +101,16 @@ function parseChecksumEntries(checksumPath: string, contents: string): ChecksumE
 
     const match = /^([0-9a-fA-F]{64})  (.+)$/.exec(line);
     if (!match) {
-      throw new Error(`${checksumPath}:${lineNumber}: expected "<sha256>  <archive>"`);
+      throw new Error(
+        `${checksumPath}:${lineNumber}: expected "<sha256>  <archive>"`,
+      );
     }
 
     const archiveName = match[2];
     if (archiveName.includes("\0")) {
-      throw new Error(`${checksumPath}:${lineNumber}: archive path contains a NUL byte`);
+      throw new Error(
+        `${checksumPath}:${lineNumber}: archive path contains a NUL byte`,
+      );
     }
 
     entries.push({
@@ -123,7 +150,10 @@ async function verifyChecksumFile(checksumPath: string): Promise<void> {
 // that can produce them. The release bundle is a native flake build
 // (`.#release-bundle` for the current system), so the requested target must
 // match the runner or the archive would be mislabeled.
-const TARGET_HOSTS: Record<string, { platform: NodeJS.Platform; arch: string }> = {
+const TARGET_HOSTS: Record<
+  string,
+  { platform: NodeJS.Platform; arch: string }
+> = {
   "linux-x64": { platform: "linux", arch: "x64" },
   "linux-arm64": { platform: "linux", arch: "arm64" },
   "macos-arm64": { platform: "darwin", arch: "arm64" },
@@ -139,7 +169,10 @@ function assertTargetMatchesHost(target: string): void {
       `Unknown release target "${target}". Expected one of: ${Object.keys(TARGET_HOSTS).join(", ")}.`,
     );
   }
-  if (process.platform !== expected.platform || process.arch !== expected.arch) {
+  if (
+    process.platform !== expected.platform ||
+    process.arch !== expected.arch
+  ) {
     throw new Error(
       `Refusing to build a "${target}" archive on ${process.platform}/${process.arch}: ` +
         `the release bundle is built natively for the host, so this would mislabel the archive. ` +
@@ -158,7 +191,8 @@ function assertPortableBinary(binary: string): void {
       .map((line) => line.trim().split(" ")[0])
       .filter((dep) => dep !== "");
     const foreign = deps.filter(
-      (dep) => !dep.startsWith("/usr/lib/") && !dep.startsWith("/System/Library/"),
+      (dep) =>
+        !dep.startsWith("/usr/lib/") && !dep.startsWith("/System/Library/"),
     );
     if (foreign.length > 0) {
       throw new Error(
@@ -200,7 +234,10 @@ async function packageRelease(
 
   const bundle = bundleDir ? resolve(bundleDir) : buildReleaseBundle();
   const stageDir = join(tmpdir(), `tynix-release-${process.pid}-${Date.now()}`);
-  const releaseDir = join(stageDir, `tynix-${version.replace(/^v/, "")}-${target}`);
+  const releaseDir = join(
+    stageDir,
+    `tynix-${version.replace(/^v/, "")}-${target}`,
+  );
 
   mkdirSync(join(releaseDir, "bin"), { recursive: true });
 
@@ -212,7 +249,10 @@ async function packageRelease(
       assertPortableBinary(destination);
     }
     copyFileSync(join(rootDir, "README.md"), join(releaseDir, "README.md"));
-    copyFileSync(join(rootDir, "CHANGELOG.md"), join(releaseDir, "CHANGELOG.md"));
+    copyFileSync(
+      join(rootDir, "CHANGELOG.md"),
+      join(releaseDir, "CHANGELOG.md"),
+    );
     copyFileSync(join(rootDir, "LICENSE"), join(releaseDir, "LICENSE"));
 
     run("tar", ["-C", stageDir, "-czf", archiveName, basename(releaseDir)]);
@@ -273,7 +313,13 @@ async function main(): Promise<void> {
   }
 
   const [version, target, archiveName, shaName] = positional;
-  if (!version || !target || !archiveName || !shaName || positional.length !== 4) {
+  if (
+    !version ||
+    !target ||
+    !archiveName ||
+    !shaName ||
+    positional.length !== 4
+  ) {
     printHelp();
     process.exit(1);
   }

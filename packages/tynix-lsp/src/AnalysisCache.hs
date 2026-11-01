@@ -54,22 +54,27 @@ analysisCacheSize :: AnalysisCache -> Int
 analysisCacheSize = Map.size . analysisCacheEntries
 
 -- | Look up a cached analysis result for the given key.
-lookupAnalysisCache :: AnalysisKey -> AnalysisCache -> Maybe (Either String Analysis)
+lookupAnalysisCache ::
+  AnalysisKey -> AnalysisCache -> Maybe (Either String Analysis)
 lookupAnalysisCache key cache = snd <$> Map.lookup key (analysisCacheEntries cache)
 
 -- | Look up and mark an entry as recently used.
-accessAnalysisCache :: AnalysisKey -> AnalysisCache -> (Maybe (Either String Analysis), AnalysisCache)
+accessAnalysisCache ::
+  AnalysisKey -> AnalysisCache -> (Maybe (Either String Analysis), AnalysisCache)
 accessAnalysisCache key cache =
   case Map.lookup key (analysisCacheEntries cache) of
     Nothing -> (Nothing, cache)
     Just (_, value) ->
       let nextSeq = analysisCacheNext cache
           entries' = Map.insert key (nextSeq, value) (analysisCacheEntries cache)
-       in (Just value, cache{analysisCacheEntries = entries', analysisCacheNext = nextSeq + 1})
+       in ( Just value,
+            cache{analysisCacheEntries = entries', analysisCacheNext = nextSeq + 1}
+          )
 
 -- | Insert or replace an analysis result, evicting the least recently used entries if
 -- the cache would exceed 'analysisCacheCapacity'.
-insertAnalysisCache :: AnalysisKey -> Either String Analysis -> AnalysisCache -> AnalysisCache
+insertAnalysisCache ::
+  AnalysisKey -> Either String Analysis -> AnalysisCache -> AnalysisCache
 insertAnalysisCache key value cache =
   let nextSeq = analysisCacheNext cache
       added = Map.insert key (nextSeq, value) (analysisCacheEntries cache)
@@ -83,7 +88,9 @@ insertAnalysisCache key value cache =
 -- 256-entry cache that turned each keystroke into hundreds of text
 -- comparisons. Finding the oldest entry is one linear scan over the sequence
 -- numbers, and removing it is a single logarithmic delete.
-evictToCapacity :: Map AnalysisKey (Int, Either String Analysis) -> Map AnalysisKey (Int, Either String Analysis)
+evictToCapacity ::
+  Map AnalysisKey (Int, Either String Analysis) ->
+  Map AnalysisKey (Int, Either String Analysis)
 evictToCapacity entries
   | Map.size entries <= analysisCacheCapacity = entries
   | otherwise =

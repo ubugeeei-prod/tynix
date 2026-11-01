@@ -16,21 +16,37 @@ import Control.Monad (forM_)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text
-import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly)
+import System.Directory
+  ( copyFile,
+    createDirectory,
+    createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    getCurrentDirectory,
+    getTemporaryDirectory,
+    listDirectory,
+    removeFile,
+    removePathForcibly,
+  )
 import System.FilePath (normalise, takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import Test.Hspec (Expectation, expectationFailure)
 
 expectRight :: (Show e) => Either e a -> IO a
 expectRight (Right value) = pure value
-expectRight (Left err) = expectationFailure ("expected Right, got Left: " <> show err) >> fail "expected Right"
+expectRight (Left err) =
+  expectationFailure ("expected Right, got Left: " <> show err)
+    >> fail "expected Right"
 
 expectLeftContaining :: Either String a -> String -> Expectation
 expectLeftContaining result needle =
   case result of
     Left err | Text.pack needle `Text.isInfixOf` Text.pack err -> pure ()
-    Left err -> expectationFailure ("expected error containing " <> show needle <> ", got " <> show err)
-    Right _ -> expectationFailure ("expected Left containing " <> show needle <> ", got Right")
+    Left err ->
+      expectationFailure
+        ("expected error containing " <> show needle <> ", got " <> show err)
+    Right _ ->
+      expectationFailure ("expected Left containing " <> show needle <> ", got Right")
 
 source :: [Text] -> Text
 source = Text.unlines
@@ -50,7 +66,10 @@ fixturePathCandidates candidates = do
         Nothing ->
           let parent = normalise (takeDirectory dir)
            in if parent == dir
-                then expectationFailure ("could not locate fixture path in ancestors: " <> show candidates) >> fail "missing fixture path"
+                then
+                  expectationFailure
+                    ("could not locate fixture path in ancestors: " <> show candidates)
+                    >> fail "missing fixture path"
                 else findFixtureRoot parent
 
     firstExistingPath _ [] = pure Nothing
@@ -63,7 +82,8 @@ fixturePathCandidates candidates = do
         else firstExistingPath dir rest
 
 withTempTree :: [(FilePath, Text)] -> (FilePath -> IO a) -> IO a
-withTempTree files action = bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
+withTempTree files action =
+  bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
   where
     createRoot = do
       tmp <- getTemporaryDirectory

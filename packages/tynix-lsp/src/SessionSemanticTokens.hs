@@ -54,7 +54,20 @@ semanticTokenTypes =
 semanticTokenModifierNames :: [Text]
 semanticTokenModifierNames = ["declaration", "readonly", "defaultLibrary", "deprecated"]
 
-tKeyword, tType, tFunction, tVariable, tProperty, tString, tNumber, tOperator, tParameter, tTypeParameter, tComment, tNamespace, tDecorator :: Int
+tKeyword,
+  tType,
+  tFunction,
+  tVariable,
+  tProperty,
+  tString,
+  tNumber,
+  tOperator,
+  tParameter,
+  tTypeParameter,
+  tComment,
+  tNamespace,
+  tDecorator ::
+    Int
 tKeyword = 0
 tType = 1
 tFunction = 2
@@ -79,13 +92,20 @@ semanticTokensFor content result = semanticTokensForScan (mkCtx "" content resul
 
 semanticTokensForScan :: Ctx -> [SemanticToken]
 semanticTokensForScan ctx =
-  concatMap splitLines (concatMap classify (zip [0 :: Int ..] (scanAllTokens scan)))
+  concatMap
+    splitLines
+    (concatMap classify (zip [0 :: Int ..] (scanAllTokens scan)))
   where
     scan = ctxScan ctx
     idx = scanLineIndex scan
     analysis = ctxAnalysis ctx
     aliases = ctxAliases ctx
-    codeStarts = Map.fromList [(tokStart t, i) | i <- [0 .. codeTokenCount scan - 1], Just t <- [codeToken scan i]]
+    codeStarts =
+      Map.fromList
+        [ (tokStart t, i)
+        | i <- [0 .. codeTokenCount scan - 1],
+          Just t <- [codeToken scan i]
+        ]
     textAt k = maybe "" tokText (codeToken scan k)
     kindAt k = tokKind <$> codeToken scan k
     binderTokens = Map.fromList [(binderToken b, b) | b <- scanBinders scan]
@@ -111,21 +131,63 @@ semanticTokensForScan ctx =
         Nothing -> []
       KUnknown -> []
 
-    operators = ["::", "->", "|>", "<|", "==", "!=", "<=", ">=", "&&", "||", "++", "//", "%1", "=", "+", "-", "*", "/", "<", ">", "!", "|", "?", ":", ".", "@", "..."]
+    operators =
+      [ "::",
+        "->",
+        "|>",
+        "<|",
+        "==",
+        "!=",
+        "<=",
+        ">=",
+        "&&",
+        "||",
+        "++",
+        "//",
+        "%1",
+        "=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "<",
+        ">",
+        "!",
+        "|",
+        "?",
+        ":",
+        ".",
+        "@",
+        "..."
+      ]
 
     identifier i t
       | name `elem` ["true", "false", "null"] = (tKeyword, 0)
       | name == "or" && textAt (i - 2) == "." = (tKeyword, 0)
       | isTypeToken scan i = typeIdentifier i t
-      | name `elem` ["type", "declare"] && kindAt (i + 1) `elem` [Just KIdent, Just KString, Just KPath] && textAt (i + 1) /= "=" && atStatementStart i = (tKeyword, 0)
-      | name == "opaque" && textAt (i + 1) == "type" && atStatementStart i = (tKeyword, 0)
-      | name == "macro" && kindAt (i + 1) == Just KIdent && textAt (i + 2) == "{" && atStatementStart i = (tKeyword, 0)
+      | name `elem` ["type", "declare"]
+          && kindAt (i + 1) `elem` [Just KIdent, Just KString, Just KPath]
+          && textAt (i + 1) /= "="
+          && atStatementStart i =
+          (tKeyword, 0)
+      | name == "opaque" && textAt (i + 1) == "type" && atStatementStart i =
+          (tKeyword, 0)
+      | name == "macro"
+          && kindAt (i + 1) == Just KIdent
+          && textAt (i + 2) == "{"
+          && atStatementStart i =
+          (tKeyword, 0)
       -- `name!( ... )` invokes a macro.
-      | textAt (i + 1) == "!" && textAt (i + 2) == "(" && tokEnd t == maybe (-1) tokStart (codeToken scan (i + 1)) = (tFunction, 0)
+      | textAt (i + 1) == "!"
+          && textAt (i + 2) == "("
+          && tokEnd t == maybe (-1) tokStart (codeToken scan (i + 1)) =
+          (tFunction, 0)
       | name == "as" && isTypeToken scan (i + 1) = (tKeyword, 0)
       | Just b <- Map.lookup i binderTokens = binderToken' b mDeclaration
       | textAt (i - 1) == "." =
-          if textAt (i - 2) == "builtins" then (memberKind i, mDefaultLibrary) else (memberKind i, 0)
+          if textAt (i - 2) == "builtins"
+            then (memberKind i, mDefaultLibrary)
+            else (memberKind i, 0)
       | isAttrKey i = (tProperty, mDeclaration)
       | Just b <- resolvedBinder i t = binderToken' b 0
       | name == "builtins" = (tNamespace, mDefaultLibrary)
@@ -141,14 +203,39 @@ semanticTokensForScan ctx =
       | name `elem` ["forall", "infer", "extends"] = (tKeyword, 0)
       | name `elem` ["dynamic", "any", "unknown"] = (tType, mDefaultLibrary)
       | textAt (i + 1) == "::" = (tProperty, mDeclaration)
-      | any (\b -> binderName b == name && binderScopeStart b <= tokStart t && tokStart t <= binderScopeEnd b) typeParams = (tTypeParameter, if Map.member i binderTokens then mDeclaration else 0)
-      | Map.member name aliases || name `elem` localAliases = (tType, if Map.member i binderTokens then mDeclaration else 0)
-      | maybe False (isUpper . fst) (Text.uncons name) = (tType, if name `elem` builtinTypes then mDefaultLibrary else 0)
+      | any
+          ( \b ->
+              binderName b == name
+                && binderScopeStart b <= tokStart t
+                && tokStart t <= binderScopeEnd b
+          )
+          typeParams =
+          (tTypeParameter, if Map.member i binderTokens then mDeclaration else 0)
+      | Map.member name aliases || name `elem` localAliases =
+          (tType, if Map.member i binderTokens then mDeclaration else 0)
+      | maybe False (isUpper . fst) (Text.uncons name) =
+          (tType, if name `elem` builtinTypes then mDefaultLibrary else 0)
       | otherwise = (tTypeParameter, 0)
       where
         name = tokText t
 
-    builtinTypes = ["Int", "Float", "Number", "Nat", "String", "Bool", "Path", "Null", "List", "Vec", "Matrix", "Tensor", "Range", "Unit", "Tuple"]
+    builtinTypes =
+      [ "Int",
+        "Float",
+        "Number",
+        "Nat",
+        "String",
+        "Bool",
+        "Path",
+        "Null",
+        "List",
+        "Vec",
+        "Matrix",
+        "Tensor",
+        "Range",
+        "Unit",
+        "Tuple"
+      ]
 
     resolvedBinder _ t = resolveNameAt scan (tokText t) (tokStart t)
 
@@ -171,11 +258,15 @@ semanticTokensForScan ctx =
 
     memberKind i =
       let path = selection i
-       in case exprPathType ctx (maybe 0 tokStart (codeToken scan (i - 2 * (length path - 1)))) path of
+       in case exprPathType
+            ctx
+            (maybe 0 tokStart (codeToken scan (i - 2 * (length path - 1))))
+            path of
             Just ty | isFunction ty -> tFunction
             _ -> tProperty
     selection i
-      | textAt (i - 1) == "." && kindAt (i - 2) == Just KIdent = selection (i - 2) <> [textAt i]
+      | textAt (i - 1) == "." && kindAt (i - 2) == Just KIdent =
+          selection (i - 2) <> [textAt i]
       | otherwise = [textAt i]
 
     -- attribute keys: `key =` / `key.sub =` at a statement start of an attrset
@@ -205,10 +296,24 @@ semanticTokensForScan ctx =
 -- | Convert the per-token list into the LSP integer delta stream that the
 -- spec requires.
 encodeSemanticTokens :: [SemanticToken] -> [Int]
-encodeSemanticTokens tokens = concat (reverse (snd (foldl step (Nothing, []) (sortOn (\token -> (semanticTokenLine token, semanticTokenStart token)) tokens))))
+encodeSemanticTokens tokens =
+  concat
+    ( reverse
+        ( snd
+            ( foldl
+                step
+                (Nothing, [])
+                (sortOn (\token -> (semanticTokenLine token, semanticTokenStart token)) tokens)
+            )
+        )
+    )
   where
     step (previous, acc) token =
-      let deltaLine = maybe (semanticTokenLine token) (\prev -> semanticTokenLine token - semanticTokenLine prev) previous
+      let deltaLine =
+            maybe
+              (semanticTokenLine token)
+              (\prev -> semanticTokenLine token - semanticTokenLine prev)
+              previous
           deltaStart =
             case previous of
               Just prev

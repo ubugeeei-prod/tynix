@@ -123,6 +123,39 @@ function readSettings(): ExtensionSettings {
   };
 }
 
+function createMiddleware(): NonNullable<LanguageClientOptions["middleware"]> {
+  return {
+    handleDiagnostics: (uri, diagnostics, next) => {
+      if (!settings.diagnostics.enabled) return next(uri, []);
+      const overrides = settings.diagnostics.severityOverrides;
+      const adjusted: vscode.Diagnostic[] = [];
+      for (const diagnostic of diagnostics) {
+        const severity = overrideSeverity(
+          diagnostic.code,
+          diagnostic.message,
+          diagnostic.severity,
+          overrides,
+        );
+        if (severity === null) continue;
+        diagnostic.severity = severity as vscode.DiagnosticSeverity;
+        adjusted.push(diagnostic);
+      }
+      next(uri, adjusted);
+    },
+    provideInlayHints: async (document, range, token, next) => {
+      const hints = settings.inlayHints;
+      if (!hints.enabled) return [];
+      const result = await next(document, range, token);
+      if (!result) return result;
+      return result.filter((hint) =>
+        hint.kind === vscode.InlayHintKind.Parameter
+          ? hints.parameterHints
+          : hints.typeHints,
+      );
+    },
+  };
+}
+
 async function startClient(
   context: vscode.ExtensionContext,
   options: { interactive: boolean },
@@ -176,36 +209,7 @@ async function startClient(
         runtime.watchPattern,
       ),
     },
-    middleware: {
-      handleDiagnostics: (uri, diagnostics, next) => {
-        if (!settings.diagnostics.enabled) return next(uri, []);
-        const overrides = settings.diagnostics.severityOverrides;
-        const adjusted: vscode.Diagnostic[] = [];
-        for (const diagnostic of diagnostics) {
-          const severity = overrideSeverity(
-            diagnostic.code,
-            diagnostic.message,
-            diagnostic.severity,
-            overrides,
-          );
-          if (severity === null) continue;
-          diagnostic.severity = severity as vscode.DiagnosticSeverity;
-          adjusted.push(diagnostic);
-        }
-        next(uri, adjusted);
-      },
-      provideInlayHints: async (document, range, token, next) => {
-        const hints = settings.inlayHints;
-        if (!hints.enabled) return [];
-        const result = await next(document, range, token);
-        if (!result) return result;
-        return result.filter((hint) =>
-          hint.kind === vscode.InlayHintKind.Parameter
-            ? hints.parameterHints
-            : hints.typeHints,
-        );
-      },
-    },
+    middleware: createMiddleware(),
   };
 
   const created = new LanguageClient(

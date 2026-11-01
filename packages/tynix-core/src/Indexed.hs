@@ -45,8 +45,27 @@ import Alias (collectApps)
 import Control.Monad (unless, when)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
-import Syntax (AmbientDecl (ambientEntries), AmbientEntry (ambientEntryType), Expr, Marked (markedValue), Program (..), exprAnnotations)
-import Type (LiteralType (..), Name, Type (..), TypeAlias (typeAliasBody), mkOpenRecord, tDynamic, tFloat, tInt, tList, tNat, tNumber)
+import Syntax
+  ( AmbientDecl (ambientEntries),
+    AmbientEntry (ambientEntryType),
+    Expr,
+    Marked (markedValue),
+    Program (..),
+    exprAnnotations,
+  )
+import Type
+  ( LiteralType (..),
+    Name,
+    Type (..),
+    TypeAlias (typeAliasBody),
+    mkOpenRecord,
+    tDynamic,
+    tFloat,
+    tInt,
+    tList,
+    tNat,
+    tNumber,
+  )
 
 -- | Infer the most precise sequence type that can be justified from a list
 -- literal's member types.
@@ -97,7 +116,8 @@ inferListType joinElem members =
        in case sequence views >>= foldTensorMembers joinElem of
             Just (shape, baseTy) -> surfaceTensorType (lenTy : shape) baseTy
             Nothing
-              | all isNothing views && hasUniformSequenceFamily normalized -> surfaceTensorType [lenTy] elemTy
+              | all isNothing views && hasUniformSequenceFamily normalized ->
+                  surfaceTensorType [lenTy] elemTy
               | all isNothing views -> tupleType normalized
               | otherwise -> tList elemTy
 
@@ -344,7 +364,8 @@ tupleType = TApp (TCon "Tuple") . TTypeList
 -- foldTensorMembers join [([1], Int), ([2], Int)]
 --   => Nothing
 -- @
-foldTensorMembers :: (Type -> Type -> Type) -> [([Type], Type)] -> Maybe ([Type], Type)
+foldTensorMembers ::
+  (Type -> Type -> Type) -> [([Type], Type)] -> Maybe ([Type], Type)
 foldTensorMembers joinElem = \case
   [] -> Nothing
   (shape, elemTy) : rest -> go shape elemTy rest
@@ -358,7 +379,10 @@ foldTensorMembers joinElem = \case
 
 -- | Validate types attached to ambient declaration entries.
 validateAmbientDecl :: AmbientDecl -> Either String ()
-validateAmbientDecl ambientDecl = traverse_ (validateType "ambient entry" . ambientEntryType) (ambientEntries ambientDecl)
+validateAmbientDecl ambientDecl =
+  traverse_
+    (validateType "ambient entry" . ambientEntryType)
+    (ambientEntries ambientDecl)
 
 -- | Walk an expression tree and validate every embedded annotation it exposes.
 --
@@ -391,7 +415,8 @@ validateType label ty =
         (TCon "Vec", [lenTy, elemTy]) ->
           validateNatType label "Vec length" lenTy *> validateType label elemTy
         (TCon "Matrix", [rowsTy, colsTy, elemTy]) ->
-          traverse_ (validateNatType label "Matrix dimension") [rowsTy, colsTy] *> validateType label elemTy
+          traverse_ (validateNatType label "Matrix dimension") [rowsTy, colsTy]
+            *> validateType label elemTy
         (TCon "Tensor", [shapeTy, elemTy]) ->
           validateShapeType label shapeTy *> validateType label elemTy
         _ -> validateType label fun *> validateType label arg
@@ -470,13 +495,32 @@ validateNatRangeType label site lowerTy upperTy baseTy = do
   upper <- validateNumericBoundType label "nat-like upper bound" upperTy
   case baseTy of
     ty | ty == tInt || ty == tNat -> pure ()
-    _ -> Left (renderIndexError label site (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy))
+    _ ->
+      Left
+        ( renderIndexError
+            label
+            site
+            (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy)
+        )
   case (lower, upper) of
     (NumericInt low, NumericInt high)
-      | low < 0 || high < 0 -> Left (renderIndexError label site (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy))
+      | low < 0 || high < 0 ->
+          Left
+            ( renderIndexError
+                label
+                site
+                (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy)
+            )
       | low <= high -> pure ()
-      | otherwise -> Left (renderRangeError label "Range bounds are inverted" lowerTy upperTy)
-    _ -> Left (renderIndexError label site (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy))
+      | otherwise ->
+          Left (renderRangeError label "Range bounds are inverted" lowerTy upperTy)
+    _ ->
+      Left
+        ( renderIndexError
+            label
+            site
+            (TApp (TApp (TApp (TCon "Range") lowerTy) upperTy) baseTy)
+        )
 
 -- | Decode one numeric bound from singleton type syntax.
 validateNumericBoundType :: Text -> Text -> Type -> Either String NumericBound
@@ -493,12 +537,25 @@ validateNumericCarrierType label site = \case
   other -> Left (renderRangeSiteError label site other)
 
 -- | Check that numeric bounds agree with their base family and interval order.
-validateRangeBounds :: Text -> NumericBound -> NumericBound -> Type -> Either String ()
+validateRangeBounds ::
+  Text -> NumericBound -> NumericBound -> Type -> Either String ()
 validateRangeBounds label lower upper baseTy = do
   unless (boundsFitBase lower upper baseTy) $
-    Left (renderRangeError label "Range bounds do not match base type" (boundType lower) (boundType upper))
+    Left
+      ( renderRangeError
+          label
+          "Range bounds do not match base type"
+          (boundType lower)
+          (boundType upper)
+      )
   when (compareNumericBound lower upper == GT) $
-    Left (renderRangeError label "Range bounds are inverted" (boundType lower) (boundType upper))
+    Left
+      ( renderRangeError
+          label
+          "Range bounds are inverted"
+          (boundType lower)
+          (boundType upper)
+      )
 
 -- | Ensure a `Unit` label is spelled as a string singleton.
 validateUnitLabelType :: Text -> Type -> Either String ()
@@ -559,7 +616,8 @@ isObviouslyInvalidIndex = \case
 -- | Recognize primitive built-in type constructors that can never stand for a
 -- user-defined nat-like shape.
 isPrimitiveTypeName :: Name -> Bool
-isPrimitiveTypeName name = name `elem` ["Bool", "Float", "Int", "List", "Null", "Number", "Path", "String"]
+isPrimitiveTypeName name =
+  name `elem` ["Bool", "Float", "Int", "List", "Null", "Number", "Path", "String"]
 
 -- | Check whether every flat element belongs to the same coarse sequence
 -- family.

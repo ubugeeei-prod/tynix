@@ -169,7 +169,26 @@ data Type
     TSingleton Name Type
   deriving (Eq, Ord, Show)
 
-{-# COMPLETE TVar, TCon, TMeta, TLit, TTypeList, TAny, TDynamic, TUnknown, TFun, TRecord, TOpenRecord, TOptional, TUnion, TApp, TForall, TConditional, TInfer, TSingleton #-}
+{-# COMPLETE
+  TVar,
+  TCon,
+  TMeta,
+  TLit,
+  TTypeList,
+  TAny,
+  TDynamic,
+  TUnknown,
+  TFun,
+  TRecord,
+  TOpenRecord,
+  TOptional,
+  TUnion,
+  TApp,
+  TForall,
+  TConditional,
+  TInfer,
+  TSingleton
+  #-}
 
 -- | A plain (non-dependent, capture-agnostic) function arrow. Matching ignores
 -- the arrow's effects, captures, and binder; constructing one yields an arrow
@@ -181,7 +200,13 @@ pattern TFun mult a b <- TArrow (arrowMult -> mult) a b
 
 -- | An arrow with untracked effects and captures and no dependent binder.
 plainArrow :: Multiplicity -> Arrow
-plainArrow mult = Arrow{arrowMult = mult, arrowEffects = TDynamic, arrowCaptures = Nothing, arrowBinder = Nothing}
+plainArrow mult =
+  Arrow
+    { arrowMult = mult,
+      arrowEffects = TDynamic,
+      arrowCaptures = Nothing,
+      arrowBinder = Nothing
+    }
 
 -- | The payload every effect label maps to inside an effect row.
 effectLabel :: Type
@@ -248,7 +273,18 @@ plainAlias name params body =
       typeAliasParamKinds = map (const Nothing) params
     }
 
-tString, tInt, tFloat, tNumber, tNat, tBool, tNull, tPath, tAny, tDynamic, tUnknown :: Type
+tString,
+  tInt,
+  tFloat,
+  tNumber,
+  tNat,
+  tBool,
+  tNull,
+  tPath,
+  tAny,
+  tDynamic,
+  tUnknown ::
+    Type
 tString = TCon "String"
 tInt = TCon "Int"
 tFloat = TCon "Float"
@@ -371,7 +407,10 @@ substituteTypeVars env
       TAny -> TAny
       TArrow arrow a b ->
         let codomainEnv = maybe env (`Map.delete` env) (arrowBinder arrow)
-         in TArrow arrow{arrowEffects = go (arrowEffects arrow)} (go a) (substituteTypeVars codomainEnv b)
+         in TArrow
+              arrow{arrowEffects = go (arrowEffects arrow)}
+              (go a)
+              (substituteTypeVars codomainEnv b)
       TRecord fields -> TRecord (fmap go fields)
       TOpenRecord fields tail' -> mkOpenRecord (fmap go fields) (go tail')
       TOptional inner -> TOptional (go inner)
@@ -426,7 +465,9 @@ closeMetas ty0 =
       (effectMetas, typeMetas) = partitionBy (`Set.member` effectsOnly) metas
       typeVars = [Text.pack ("t" <> show i) | i <- [0 .. length typeMetas - 1]]
       effectVars = [Text.pack ("e" <> show i) | i <- [0 .. length effectMetas - 1]]
-      subst = Map.fromList (zip typeMetas (TVar <$> typeVars) <> zip effectMetas (TVar <$> effectVars))
+      subst =
+        Map.fromList
+          (zip typeMetas (TVar <$> typeVars) <> zip effectMetas (TVar <$> effectVars))
    in Scheme (typeVars <> effectVars) (substituteMetas subst ty)
   where
     partitionBy p xs = (filter p xs, filter (not . p) xs)
@@ -437,7 +478,10 @@ metaOccurrences :: Type -> (Map Int Int, Map Int Int)
 metaOccurrences = go False
   where
     go inEffect = \case
-      TMeta n -> if inEffect then (Map.empty, Map.singleton n 1) else (Map.singleton n 1, Map.empty)
+      TMeta n ->
+        if inEffect
+          then (Map.empty, Map.singleton n 1)
+          else (Map.singleton n 1, Map.empty)
       TArrow arrow a b -> go inEffect a <+> go inEffect b <+> go True (arrowEffects arrow)
       TTypeList items -> foldr ((<+>) . go inEffect) mempty' items
       TRecord fields -> foldr ((<+>) . go inEffect) mempty' (Map.elems fields)
@@ -456,7 +500,11 @@ metaOccurrences = go False
 loneEffectMetas :: Type -> Set Int
 loneEffectMetas ty =
   let (typeCounts, effectCounts) = metaOccurrences ty
-   in Map.keysSet (Map.filterWithKey (\n count -> count == 1 && not (Map.member n typeCounts)) effectCounts)
+   in Map.keysSet
+        ( Map.filterWithKey
+            (\n count -> count == 1 && not (Map.member n typeCounts))
+            effectCounts
+        )
 
 -- | Metas that occur only inside effect rows (effect variables).
 effectOnlyMetas :: Type -> Set Int

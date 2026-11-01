@@ -6,7 +6,13 @@ import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.List (sort)
 import SessionWorkspace
-import System.Directory (createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeFile, removePathForcibly)
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    getTemporaryDirectory,
+    removeFile,
+    removePathForcibly,
+  )
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import Test.Hspec
@@ -129,7 +135,8 @@ spec = do
         )
 
 withTempTree :: [(FilePath, String)] -> (FilePath -> IO a) -> IO a
-withTempTree files action = bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
+withTempTree files action =
+  bracket createRoot removePathForcibly (\root -> writeTree root >> action root)
   where
     createRoot = do
       tmp <- getTemporaryDirectory

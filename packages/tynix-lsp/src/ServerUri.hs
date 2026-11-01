@@ -19,7 +19,14 @@ module ServerUri
 where
 
 import Data.ByteString qualified as BS
-import Data.Char (digitToInt, isAsciiLower, isAsciiUpper, isDigit, isHexDigit, toUpper)
+import Data.Char
+  ( digitToInt,
+    isAsciiLower,
+    isAsciiUpper,
+    isDigit,
+    isHexDigit,
+    toUpper,
+  )
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -38,7 +45,9 @@ pathUri file = "file://" <> percentEncode (T.pack file)
 -- Tolerates the optional @localhost@ authority some clients emit
 -- (`file://localhost/...`).
 uriPath :: Text -> FilePath
-uriPath text = T.unpack (percentDecode (stripAuthority (fromMaybe text (T.stripPrefix "file://" text))))
+uriPath text =
+  T.unpack
+    (percentDecode (stripAuthority (fromMaybe text (T.stripPrefix "file://" text))))
 
 percentEncode :: Text -> Text
 percentEncode =
@@ -46,12 +55,18 @@ percentEncode =
   where
     encodeChar char
       | isUnreserved char || char == '/' = T.singleton char
-      | otherwise = T.concat (map encodeByte (BS.unpack (TextEncoding.encodeUtf8 (T.singleton char))))
+      | otherwise =
+          T.concat
+            (map encodeByte (BS.unpack (TextEncoding.encodeUtf8 (T.singleton char))))
     encodeByte byte = T.pack ('%' : map toUpper (pad (showHex byte "")))
     -- Percent-encoding always spells a byte with two hex digits.
     pad [digit] = ['0', digit]
     pad digits = digits
-    isUnreserved char = isAsciiLower char || isAsciiUpper char || isDigit char || char `elem` ['-', '.', '_', '~']
+    isUnreserved char =
+      isAsciiLower char
+        || isAsciiUpper char
+        || isDigit char
+        || char `elem` ['-', '.', '_', '~']
 
 percentDecode :: Text -> Text
 percentDecode text =
@@ -60,7 +75,8 @@ percentDecode text =
     Right decoded -> decoded
   where
     decodeBytes ('%' : a : b : rest)
-      | isHexDigit a && isHexDigit b = fromIntegral (digitToInt a * 16 + digitToInt b) : decodeBytes rest
+      | isHexDigit a && isHexDigit b =
+          fromIntegral (digitToInt a * 16 + digitToInt b) : decodeBytes rest
     decodeBytes (char : rest) = BS.unpack (TextEncoding.encodeUtf8 (T.singleton char)) <> decodeBytes rest
     decodeBytes [] = []
 

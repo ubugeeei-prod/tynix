@@ -110,7 +110,9 @@ spec = do
                       "end" .= object ["line" .= (1 :: Int), "character" .= (10 :: Int)]
                     ]
               ]
-      length (directiveActions "/tmp/x.tynix" "let\nvalue = missing;\nin value\n" diag) `shouldBe` 2
+      length
+        (directiveActions "/tmp/x.tynix" "let\nvalue = missing;\nin value\n" diag)
+        `shouldBe` 2
 
     it "skips both quick fixes when the previous line already has @tynix-ignore" $ do
       let diag =
@@ -126,7 +128,8 @@ spec = do
 
   describe "closestCandidate / nameDistance" $ do
     it "returns the closest candidate within the edit-distance budget" $
-      closestCandidate ["values", "validate", "vector"] "valeu" `shouldBe` Just "values"
+      closestCandidate ["values", "validate", "vector"] "valeu"
+        `shouldBe` Just "values"
 
     it "returns Nothing when no candidate is close enough" $
       closestCandidate ["alpha", "beta", "gamma"] "valuesomething" `shouldBe` Nothing

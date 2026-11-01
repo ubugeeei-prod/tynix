@@ -37,7 +37,8 @@ forallParser = try $ do
 -- context is dropped after parsing.
 constraintContext :: Parser [Type]
 constraintContext = try $ do
-  constraints <- try (parens (sepBy1 appParser (symbol ","))) <|> (pure <$> appParser)
+  constraints <-
+    try (parens (sepBy1 appParser (symbol ","))) <|> (pure <$> appParser)
   _ <- symbol "=>"
   pure constraints
 
@@ -171,7 +172,8 @@ atomParser =
 recordParser :: Parser Type
 recordParser = braces $ do
   fields <- many fieldParser
-  rowTail <- optional (symbol "..." *> optional typeIdentifier <* optional (symbol ";"))
+  rowTail <-
+    optional (symbol "..." *> optional typeIdentifier <* optional (symbol ";"))
   pure $ case rowTail of
     Nothing -> TRecord (Map.fromList fields)
     Just Nothing -> TOpenRecord (Map.fromList fields) TDynamic

@@ -93,9 +93,11 @@ freeVariables = go
       EBinaryOp _ l r -> go l <> go r
       EUnaryOp _ x -> go x
       ELet items body ->
-        (foldMap (goLet . markedValue) items <> go body) `Set.difference` Set.fromList (letBoundNames items)
+        (foldMap (goLet . markedValue) items <> go body)
+          `Set.difference` Set.fromList (letBoundNames items)
       EAttrSet items -> foldMap goAttr items
-      ERec items -> foldMap goAttr items `Set.difference` Set.fromList (concatMap attrNames items)
+      ERec items ->
+        foldMap goAttr items `Set.difference` Set.fromList (concatMap attrNames items)
       ESelect base steps -> go base <> foldMap goStep steps
       ESelectOr base steps def -> go base <> foldMap goStep steps <> go def
       EHasAttr base steps -> go base <> foldMap goStep steps
