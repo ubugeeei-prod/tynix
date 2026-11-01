@@ -43,7 +43,7 @@ where
 import Alias (AliasEnv)
 import Check.Expression (patternBoundNames)
 import Control.Monad (when)
-import Control.Monad.State.Strict
+import Control.Monad.State.Strict (StateT (..), evalStateT, get, gets, lift, modify', put)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set

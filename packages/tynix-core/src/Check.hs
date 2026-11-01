@@ -31,7 +31,7 @@ import Data.Graph (flattenSCC, stronglyConnComp)
 import Data.List (group, intercalate, isInfixOf, nub, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Diagnostics (DiagnosticCode (..), withCode)
