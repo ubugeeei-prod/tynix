@@ -57,7 +57,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(matrix.os, 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
 
@@ -271,7 +271,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(vars.CI_RUNNER || 'ubuntu-latest', 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
 
@@ -365,7 +365,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: ./release-artifacts/*
           generate_release_notes: true
@@ -387,7 +387,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(vars.CI_RUNNER || 'ubuntu-latest', 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
 
