@@ -380,6 +380,15 @@ Declaration-only files have no executable root expression.
 `tynix emit`/`tynix.emit` was asked to emit declarations from a file that
 has no root expression.
 
+### `TD0009` — cyclic compiled source import
+
+`import ./a.nix` resolved to a sibling `a.tynix`, and following those sibling
+sources returned to a file already being checked (`a.tynix` imports `b.nix`
+while `b.tynix` imports `a.nix`). The message lists the cycle.
+
+**Fix:** break the import cycle, or type one side with a `declare` and do not
+leave a sibling `.tynix` beside that path.
+
 ## Language Server Lints (`TLxxxx`)
 
 These diagnostics come from `tynix-lsp` only; `tynix check` and

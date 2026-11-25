@@ -1212,26 +1212,54 @@ inferArithmetic ctx env op left right = do
         _ <- constrain ctx rightTy expected
         zonk expected
 
+-- | An operand of `+` that can still be string or path concatenation.
+--
+-- `TextUnknown` is an unsolved meta, which decides nothing by itself.
+-- A union is text only when every member is and the members agree on one
+-- family. `(x.a or "")` is a fresh meta joined with `""`, so that union is
+-- still a string. A numeric member, or a string mixed with a path, is not.
+data TextConcatKind = TextString | TextPath | TextUnknown
+
 -- | Decide whether `+` is string/path concatenation. The result follows the
 -- left operand: `path + string` is a path, `string + path` a string.
 textConcatTarget ::
   AliasEnv -> BinOp -> Type -> Type -> Maybe (Type, Type, Type)
 textConcatTarget aliases op left right
   | op /= OpAdd = Nothing
-  | isPathLike left,
-    isTextLike right || isMeta right =
-      Just (tPath, tString `orPath` right, tPath)
-  | isStringLike left,
-    isTextLike right || isMeta right =
-      Just (tString, tString `orPath` right, tString)
-  | isMeta left, isStringLike right = Just (tString, tString, tString)
-  | isMeta left, isPathLike right = Just (tPath, tPath, tPath)
+  -- A union is text when every member agrees, so `(x.a or "")` — a fresh meta
+  -- joined with `""` — is still a string. The cases below cover that and the
+  -- plain string/path pairs.
+  | Just leftKind <- textKind left,
+    Just rightKind <- textKind right =
+      combineText leftKind rightKind
   | otherwise = Nothing
   where
     isStringLike ty = isSubtype aliases ty tString
     isPathLike ty = isSubtype aliases ty tPath
-    isTextLike ty = isStringLike ty || isPathLike ty
-    orPath base ty = if isPathLike ty then tPath else base
+    textKind ty
+      | isMeta ty = Just TextUnknown
+      | isPathLike ty = Just TextPath
+      | isStringLike ty = Just TextString
+      | otherwise =
+          case resolveHead aliases ty of
+            TUnion members -> combineKinds =<< traverse textKind members
+            _ -> Nothing
+    combineKinds [] = Nothing
+    combineKinds (kind : kinds) = foldM mergeText kind kinds
+    mergeText TextUnknown kind = Just kind
+    mergeText kind TextUnknown = Just kind
+    mergeText TextString TextString = Just TextString
+    mergeText TextPath TextPath = Just TextPath
+    mergeText _ _ = Nothing
+    combineText TextPath TextPath = Just (tPath, tPath, tPath)
+    combineText TextPath TextString = Just (tPath, tString, tPath)
+    combineText TextPath TextUnknown = Just (tPath, tString, tPath)
+    combineText TextString TextPath = Just (tString, tPath, tString)
+    combineText TextString TextString = Just (tString, tString, tString)
+    combineText TextString TextUnknown = Just (tString, tString, tString)
+    combineText TextUnknown TextPath = Just (tPath, tPath, tPath)
+    combineText TextUnknown TextString = Just (tString, tString, tString)
+    combineText TextUnknown TextUnknown = Nothing
 
 -- | Pick the numeric result family for an arithmetic operator. Subtraction can
 -- yield negative results, so a `Nat`-only operand pair widens to `Int`.

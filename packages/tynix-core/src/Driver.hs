@@ -44,11 +44,11 @@ import Check hiding (resolvePath)
 import Check qualified
 import Compile
 import Control.Applicative ((<|>))
-import Control.Exception (IOException, displayException, try)
+import Control.Exception (IOException, bracket_, displayException, try)
 import Control.Monad (foldM, forM, forM_)
 import Data.ByteString qualified as ByteString
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.List (group, isSuffixOf, nub, sort)
+import Data.List (group, intercalate, isSuffixOf, nub, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -74,6 +74,7 @@ import System.FilePath
     replaceExtension,
     splitDirectories,
     takeDirectory,
+    takeExtension,
     takeFileName,
     (</>),
   )
@@ -174,63 +175,22 @@ analyzeTextWith cache path input =
     <$> analyzeTextDetailedWith cache path input
 
 -- | Analyze a buffer, keeping structured location information on failure.
+--
+-- The path is pushed for the duration of the call so that a compiled-source
+-- import of this same file is reported as a cycle instead of re-entering it.
 analyzeTextDetailedWith ::
   SupportCache -> FilePath -> Text -> IO (Either AnalysisError Analysis)
-analyzeTextDetailedWith cache path input = do
-  support <- loadSupportWith cache path
-  pure $ do
-    supportWorld <- plain support
-    located <- case parseProgramLocatedDetailed path input of
-      Left err ->
-        Left
-          ( AnalysisError
-              (Text.unpack (parseErrorMessage err))
-              ( Just
-                  ( parseErrorLine err,
-                    parseErrorColumn err,
-                    parseErrorLine err,
-                    parseErrorColumn err
-                  )
-              )
-          )
-      Right program -> Right program
-    let program = stripProgramLocations located
-    _ <-
-      plain
-        ( validateProgramKinds
-            (programAliases program <> worldAliases supportWorld)
-            program
-        )
-    _ <- plain (validateProgramIndexedTypes program)
-    localAmbient <- plain (collectAmbient path program)
-    let aliases = mkAliasEnv (programAliases program <> worldAliases supportWorld)
-        ambient = localAmbient <> worldAmbient supportWorld
-        context =
-          CheckContext
-            { checkAliases = aliases,
-              checkAmbient = ambient,
-              checkFile = path,
-              checkOpenScope = False,
-              -- Flakes are evaluated in pure mode.
-              checkPureEval = takeFileName path == "flake.tynix"
-            }
-    -- Each macro rule's template is checked once, here, rather than at every
-    -- expansion.
-    checkMacroTemplates context input located
-    result <- case checkProgramDetailed context located of
-      Left err ->
-        Left
-          (AnalysisError (checkErrorMessage err) (spanToRange input <$> checkErrorSpan err))
-      Right ok -> Right ok
-    pure
-      Analysis
-        { analysisProgram = program,
-          analysisLocatedProgram = located,
-          analysisRoot = resultRoot result,
-          analysisBindings = resultBindings result,
-          analysisAliases = aliases,
-          analysisAmbient = ambient
-        }
+analyzeTextDetailedWith cache path input =
+  let file = normalizeSourcePath path
+   in bracket_ (pushCompiled cache file) (popCompiled cache) $ do
+        support <- loadSupportWith cache file
+        case prepareAnalysis file input support of
+          Left err -> pure (Left err)
+          Right prepared -> do
+            imported <- resolveCompiledImports cache file input (preparedExpr prepared)
+            pure $ case imported of
+              Left err -> Left err
+              Right sourceAmbient -> finishAnalysis file input prepared sourceAmbient
 
 -- | Check each macro template once, attributing failures to its definition.
 checkMacroTemplates ::
@@ -263,6 +223,357 @@ checkMacroTemplates context input program =
 
 plain :: Either String a -> Either AnalysisError a
 plain = either (\message -> Left (AnalysisError message Nothing)) Right
+
+-- | The parsed file, ready to check once compiled-source imports are resolved.
+data PreparedAnalysis = PreparedAnalysis
+  { preparedProgram :: Program,
+    preparedLocated :: Program,
+    preparedAliases :: AliasEnv,
+    preparedAmbient :: Map FilePath Scheme,
+    preparedExpr :: Expr
+  }
+
+prepareAnalysis ::
+  FilePath -> Text -> Either String World -> Either AnalysisError PreparedAnalysis
+prepareAnalysis file input support = do
+  supportWorld <- plain support
+  located <- case parseProgramLocatedDetailed file input of
+    Left err ->
+      Left
+        ( AnalysisError
+            (Text.unpack (parseErrorMessage err))
+            ( Just
+                ( parseErrorLine err,
+                  parseErrorColumn err,
+                  parseErrorLine err,
+                  parseErrorColumn err
+                )
+            )
+        )
+    Right program -> Right program
+  let program = stripProgramLocations located
+  _ <-
+    plain
+      ( validateProgramKinds
+          (programAliases program <> worldAliases supportWorld)
+          program
+      )
+  _ <- plain (validateProgramIndexedTypes program)
+  localAmbient <- plain (collectAmbient file program)
+  pure
+    PreparedAnalysis
+      { preparedProgram = program,
+        preparedLocated = located,
+        preparedAliases =
+          mkAliasEnv (programAliases program <> worldAliases supportWorld),
+        preparedAmbient = localAmbient <> worldAmbient supportWorld,
+        preparedExpr = maybe (EAttrSet []) markedValue (programExpr located)
+      }
+
+-- | Check a prepared file. Schemes from sibling `.tynix` sources override
+-- declarations for the same compiled path: the source is newer than the last
+-- emit, and a handwritten `declare` must not hide the implementation.
+finishAnalysis ::
+  FilePath ->
+  Text ->
+  PreparedAnalysis ->
+  Map FilePath Scheme ->
+  Either AnalysisError Analysis
+finishAnalysis file input prepared sourceAmbient = do
+  let aliases = preparedAliases prepared
+      ambient = Map.union sourceAmbient (preparedAmbient prepared)
+      located = preparedLocated prepared
+      context =
+        CheckContext
+          { checkAliases = aliases,
+            checkAmbient = ambient,
+            checkFile = file,
+            checkOpenScope = False,
+            -- Flakes are evaluated in pure mode.
+            checkPureEval = takeFileName file == "flake.tynix"
+          }
+  -- Each macro rule's template is checked once, here, rather than at every
+  -- expansion. Sibling imports run this for the file they read from disk.
+  checkMacroTemplates context input located
+  result <- case checkProgramDetailed context located of
+    Left err ->
+      Left
+        (AnalysisError (checkErrorMessage err) (spanToRange input <$> checkErrorSpan err))
+    Right ok -> Right ok
+  pure
+    Analysis
+      { analysisProgram = preparedProgram prepared,
+        analysisLocatedProgram = preparedLocated prepared,
+        analysisRoot = resultRoot result,
+        analysisBindings = resultBindings result,
+        analysisAliases = aliases,
+        analysisAmbient = ambient
+      }
+
+-- | One `import` of a path or string literal, with the span of that call.
+data ImportSite = ImportSite
+  { importSiteSpan :: Maybe SrcSpan,
+    importSiteTarget :: FilePath
+  }
+
+-- | Resolve every static `import ./file.nix` whose sibling `file.tynix` exists.
+--
+-- Nix evaluates the `.nix`. The `.tynix` beside it is the implementation, so
+-- its checked root scheme is the type of that import. A path that is not a
+-- `.nix` literal, or whose sibling is absent, keeps the declaration world
+-- (or `dynamic`, when nothing declares it). `import` shadowed by a local
+-- binding is ignored, matching the checker. `with` is not treated as binding
+-- `import`: its scope is a value, and enumerating it would guess.
+resolveCompiledImports ::
+  SupportCache ->
+  FilePath ->
+  Text ->
+  Expr ->
+  IO (Either AnalysisError (Map FilePath Scheme))
+resolveCompiledImports cache file input expr =
+  foldM step (Right Map.empty) (importSites False Nothing expr)
+  where
+    step (Left err) _ = pure (Left err)
+    step (Right found) site = do
+      loaded <- loadCompiledImport cache file input site
+      pure $ case loaded of
+        Left err -> Left err
+        Right Nothing -> Right found
+        Right (Just (key, scheme)) -> Right (Map.insert key scheme found)
+
+loadCompiledImport ::
+  SupportCache ->
+  FilePath ->
+  Text ->
+  ImportSite ->
+  IO (Either AnalysisError (Maybe (FilePath, Scheme)))
+loadCompiledImport cache file input site =
+  let nixPath = resolvePath file (importSiteTarget site)
+   in case compiledSourceOf nixPath of
+        Nothing -> pure (Right Nothing)
+        Just sourcePath -> do
+          exists <- doesFileExist sourcePath
+          if not exists
+            then pure (Right Nothing)
+            else do
+              analysis <- analyzeCompiledSource cache sourcePath
+              pure $ case analysis of
+                Left err -> Left (attributeCompiledImport input site sourcePath err)
+                Right found ->
+                  Right $
+                    fmap
+                      (\scheme -> (nixPath, expandScheme (analysisAliases found) scheme))
+                      (analysisRoot found)
+
+-- | Read and analyze a `.tynix` file that backs a compiled `.nix` import.
+--
+-- The result is memoized for this cache. Re-entering a file that is already
+-- on the stack is a cycle; the entry point's unsaved buffer is not reused,
+-- because a sibling import names the file on disk.
+analyzeCompiledSource ::
+  SupportCache -> FilePath -> IO (Either AnalysisError Analysis)
+analyzeCompiledSource cache path = do
+  let file = normalizeSourcePath path
+  cached <- Map.lookup file <$> readIORef (cacheCompiled cache)
+  case cached of
+    Just hit -> pure hit
+    Nothing -> do
+      stack <- readIORef (cacheCompiledStack cache)
+      if file `elem` stack
+        then pure (Left (cyclicCompiledImport file stack))
+        else do
+          readResult <- readTextFile file
+          result <- case readResult of
+            Left err -> pure (Left (AnalysisError err Nothing))
+            Right input -> analyzeTextDetailedWith cache file input
+          modifyIORef' (cacheCompiled cache) (Map.insert file result)
+          pure result
+
+attributeCompiledImport ::
+  Text -> ImportSite -> FilePath -> AnalysisError -> AnalysisError
+attributeCompiledImport input site sourcePath err =
+  err
+    { analysisErrorMessage =
+        "compiled source "
+          <> sourcePath
+          <> " failed to check: "
+          <> renderAnalysisError err,
+      analysisErrorRange = spanToRange input <$> importSiteSpan site
+    }
+
+cyclicCompiledImport :: FilePath -> [FilePath] -> AnalysisError
+cyclicCompiledImport file stack =
+  AnalysisError
+    { analysisErrorMessage =
+        withCode
+          TD0009CyclicCompiledImport
+          ( "cyclic compiled source import: "
+              <> formatCycle (reverse stack ++ [file])
+          ),
+      analysisErrorRange = Nothing
+    }
+
+formatCycle :: [FilePath] -> String
+formatCycle = intercalate " -> "
+
+-- | The `.tynix` implementation of a compiled `.nix` path, when the import
+-- target is itself a `.nix` file. `foo.nix` maps to `foo.tynix`, never to
+-- `foo.d.tynix`.
+compiledSourceOf :: FilePath -> Maybe FilePath
+compiledSourceOf nixPath
+  | takeExtension nixPath == ".nix" = Just (replaceExtension nixPath ".tynix")
+  | otherwise = Nothing
+
+expandScheme :: AliasEnv -> Scheme -> Scheme
+expandScheme env (Scheme vars ty) = Scheme vars (expandAliases env ty)
+
+normalizeSourcePath :: FilePath -> FilePath
+normalizeSourcePath = collapseParentSegments . normalise
+
+pushCompiled :: SupportCache -> FilePath -> IO ()
+pushCompiled cache file = modifyIORef' (cacheCompiledStack cache) (file :)
+
+popCompiled :: SupportCache -> IO ()
+popCompiled cache =
+  modifyIORef' (cacheCompiledStack cache) $ \case
+    [] -> []
+    _ : rest -> rest
+
+-- | Static `import` calls of a path or string literal.
+--
+-- @shadowed@ is true when a local binding named `import` hides the builtin in
+-- this scope. Nix `let` is recursive, and a lambda's formals are in scope in
+-- every default, so the flag covers the whole binding group.
+importSites :: Bool -> Maybe SrcSpan -> Expr -> [ImportSite]
+importSites shadowed here = \case
+  ELoc region inner -> importSites shadowed (Just region) inner
+  EApp fun arg
+    | not shadowed,
+      EVar "import" <- peel fun,
+      Just target <- literalImportTarget (peel arg) ->
+        [ImportSite here target]
+  EApp fun arg -> nested [fun, arg]
+  ELambda pattern' body ->
+    patternImportSites shadowed here pattern'
+      ++ importSites (shadowed || patternBindsImport pattern') here body
+  EBinaryOp _ left right -> nested [left, right]
+  EUnaryOp _ operand -> nested [operand]
+  ELet items body ->
+    let shadowed' = shadowed || any (letBindsImport . markedValue) items
+        inItems item = case markedValue item of
+          LetBinding _ expr -> importSites shadowed' here expr
+          LetInherit source _ -> maybe [] (importSites shadowed' here) source
+          LetPath steps expr ->
+            concatMap (stepSites shadowed' here) steps ++ importSites shadowed' here expr
+          LetSignature _ _ -> []
+     in concatMap inItems items ++ importSites shadowed' here body
+  EAttrSet items -> concatMap (attrSites shadowed here) items
+  -- `rec` fields are in scope for every field body and for `inherit (source)`,
+  -- same as `let`. A non-recursive attrset does not bind its own fields.
+  ERec items ->
+    let shadowed' = shadowed || any attrBindsImport items
+     in concatMap (attrSites shadowed' here) items
+  ESelect base steps -> importSites shadowed here base ++ concatMap (stepSites shadowed here) steps
+  EHasAttr base steps -> importSites shadowed here base ++ concatMap (stepSites shadowed here) steps
+  EAssert cond body -> nested [cond, body]
+  EWith scope body -> nested [scope, body]
+  EIf cond yesExpr noExpr -> nested [cond, yesExpr, noExpr]
+  EList members -> concatMap (importSites shadowed here) members
+  ECast inner _ -> importSites shadowed here inner
+  -- An ascription is erased. The import inside it is still the import Nix
+  -- evaluates, so it has to be typed from the sibling source.
+  EAscribe inner _ -> importSites shadowed here inner
+  EInterp _ parts -> concatMap (partSites shadowed here) parts
+  ESelectOr base steps fallback ->
+    importSites shadowed here base
+      ++ concatMap (stepSites shadowed here) steps
+      ++ importSites shadowed here fallback
+  EPathInterp parts -> concatMap (partSites shadowed here) parts
+  EVar _ -> []
+  EString _ -> []
+  EFloat _ -> []
+  EInt _ -> []
+  EBool _ -> []
+  ENull -> []
+  EPath _ -> []
+  ESearchPath _ -> []
+  where
+    nested = concatMap (importSites shadowed here)
+
+patternImportSites :: Bool -> Maybe SrcSpan -> Pattern -> [ImportSite]
+patternImportSites shadowed here = \case
+  PVar _ _ -> []
+  PAttrSet fields _ binder ->
+    let shadowed' = shadowed || fieldsBindImport fields || binderBindsImport binder
+     in concat
+          [ importSites shadowed' here expr
+          | field <- fields,
+            Just expr <- [patternFieldDefault field]
+          ]
+
+attrSites :: Bool -> Maybe SrcSpan -> AttrItem -> [ImportSite]
+attrSites shadowed here = \case
+  AttrField _ expr -> importSites shadowed here expr
+  AttrInherit _ -> []
+  AttrInheritFrom source _ -> importSites shadowed here source
+  AttrPath steps expr -> concatMap (stepSites shadowed here) steps ++ importSites shadowed here expr
+
+stepSites :: Bool -> Maybe SrcSpan -> SelectStep -> [ImportSite]
+stepSites shadowed here = \case
+  SelectName _ -> []
+  SelectDynamic expr -> importSites shadowed here expr
+
+partSites :: Bool -> Maybe SrcSpan -> StringPart -> [ImportSite]
+partSites shadowed here = \case
+  StrExpr expr -> importSites shadowed here expr
+  StrText _ -> []
+  StrEscape _ -> []
+
+letBindsImport :: LetItem -> Bool
+letBindsImport = \case
+  LetBinding name _ -> name == "import"
+  LetInherit _ names -> "import" `elem` names
+  LetPath (SelectName name : _) _ -> name == "import"
+  LetPath _ _ -> False
+  LetSignature _ _ -> False
+
+-- | A `rec` attribute introduces `import` when its head name is `import`.
+-- Bare `inherit` names count: they are fields of the rec set even though the
+-- inherited value itself is resolved in the enclosing scope.
+attrBindsImport :: AttrItem -> Bool
+attrBindsImport = \case
+  AttrField name _ -> name == "import"
+  AttrInherit names -> "import" `elem` names
+  AttrInheritFrom _ names -> "import" `elem` names
+  AttrPath (SelectName name : _) _ -> name == "import"
+  AttrPath _ _ -> False
+
+patternBindsImport :: Pattern -> Bool
+patternBindsImport = \case
+  PVar "import" _ -> True
+  PVar _ _ -> False
+  PAttrSet fields _ binder -> fieldsBindImport fields || binderBindsImport binder
+
+fieldsBindImport :: [PatternField] -> Bool
+fieldsBindImport = any ((== "import") . patternFieldName)
+
+binderBindsImport :: Maybe PatternBinder -> Bool
+binderBindsImport = \case
+  Just (BinderBefore "import") -> True
+  Just (BinderAfter "import") -> True
+  _ -> False
+
+peel :: Expr -> Expr
+peel = \case
+  ELoc _ inner -> peel inner
+  other -> other
+
+literalImportTarget :: Expr -> Maybe FilePath
+literalImportTarget = \case
+  EPath raw -> Just raw
+  EString literal -> Just (Text.unpack (stringLiteralText literal))
+  ELoc _ inner -> literalImportTarget inner
+  _ -> Nothing
 
 -- | Read and analyze a file from disk.
 analyzeFile :: FilePath -> IO (Either String Analysis)
@@ -412,31 +723,36 @@ data SupportBundle = SupportBundle
     bundleWorlds :: [Either String World]
   }
 
--- | Memo table for 'SupportBundle's, keyed by workspace root.
+-- | Memo tables shared by every file analyzed in one command or request.
 --
--- Without it, analyzing @n@ sources against @m@ declaration files re-walks the
--- workspace and re-parses every declaration file @n@ times. Callers that
--- analyze more than one file — @check-project@, @build@, @emit-project@, and
--- the language server's workspace-wide requests — should create one cache and
--- thread it through, which collapses that to a single pass.
+-- Declaration discovery is keyed by workspace root. Compiled-source analysis
+-- is keyed by the normalized `.tynix` path, so a diamond of `import ./x.nix`
+-- reads `x.tynix` once. The stack is the files whose analysis is in progress;
+-- it exists only to report a cycle.
 --
 -- The cache holds no invalidation logic on purpose: its scope is one CLI
--- command or one LSP request, so it can never serve a stale read.
-newtype SupportCache = SupportCache (IORef (Map FilePath (Either String SupportBundle)))
+-- command or one LSP request, so it can never serve a stale read. The entry
+-- point's buffer is not stored here, because that buffer may differ from disk.
+data SupportCache = SupportCache
+  { cacheSupport :: IORef (Map FilePath (Either String SupportBundle)),
+    cacheCompiled :: IORef (Map FilePath (Either AnalysisError Analysis)),
+    cacheCompiledStack :: IORef [FilePath]
+  }
 
 -- | Create an empty 'SupportCache'.
 newSupportCache :: IO SupportCache
-newSupportCache = SupportCache <$> newIORef Map.empty
+newSupportCache =
+  SupportCache <$> newIORef Map.empty <*> newIORef Map.empty <*> newIORef []
 
 loadSupportWith :: SupportCache -> FilePath -> IO (Either String World)
-loadSupportWith (SupportCache ref) path = do
+loadSupportWith cache path = do
   root <- findSupportRoot path
-  cached <- Map.lookup root <$> readIORef ref
+  cached <- Map.lookup root <$> readIORef (cacheSupport cache)
   bundle <- case cached of
     Just hit -> pure hit
     Nothing -> do
       loaded <- loadSupportBundle root
-      modifyIORef' ref (Map.insert root loaded)
+      modifyIORef' (cacheSupport cache) (Map.insert root loaded)
       pure loaded
   pure (withBuiltinPrelude <$> (bundle >>= supportWorldFor path))
 

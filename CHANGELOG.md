@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.1.0 - 2026-11-25
 
 ### Added: a much richer type system
 
@@ -49,6 +49,21 @@ cover all of it.
 [`TC0025`]: https://tynix.dev/diagnostics#tc0025--closure-captures-a-capability-its-type-does-not-allow
 [`TC0026`]: https://tynix.dev/diagnostics#tc0026--linearity-violation
 [`TC0027`]: https://tynix.dev/diagnostics#tc0027--field-selected-from-an-opaque-type
+
+- `import ./file.nix` (and `import "./file.nix"`) uses the checked type of a
+  sibling `file.tynix` when that file exists. The source overrides a `declare`
+  for the same path, so a project can compile `.tynix` to committed `.nix`
+  without restating each module in a declaration. A cycle through those
+  sibling sources is [`TD0009`](docs/diagnostics.md). An unsaved editor buffer
+  does not stand in for a sibling; the import reads the file on disk.
+
+### Fixed
+
+- `+` treats `(x.a or "")` on an unknown `x` as string concatenation. The
+  default is joined with a fresh meta, and that union is still text when
+  every other member is. A numeric default stays arithmetic.
+- An empty attribute set prints as `{ }`, and an empty recursive set as
+  `rec { }`. A blank line between the braces is what nixfmt then preserves.
 
 ## v2.0.0 - 2026-10-05
 

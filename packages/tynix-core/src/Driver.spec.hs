@@ -45,6 +45,21 @@ spec = describe "analysis" $ do
     analysis <- analyzeText "main.tynix" "1.5" >>= expectRight
     analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LFloat 1.5)))
 
+  it "concatenates a string default chosen for an unknown selection" $ do
+    analysis <-
+      analyzeText "main.tynix" "x: (x.hook or \"\") + \"tail\"" >>= expectRight
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "forall t0. t0 %1 -> String"
+
+  it "still adds a numeric default chosen for an unknown selection" $ do
+    analysis <- analyzeText "main.tynix" "x: (x.n or 1) + 2" >>= expectRight
+    fmap renderScheme (analysisRoot analysis)
+      `shouldBe` Just "forall t0. t0 %1 -> Int"
+
+  it "rejects adding a numeric default to a string" $
+    analyzeText "main.tynix" "x: (x.n or 1) + \"tail\""
+      >>= (`expectLeftContaining` "type mismatch")
+
   it "infers int addition inside legacy nix lambdas" $ do
     analysis <- analyzeText "math.nix" "{ inc = x: x + 1; }" >>= expectRight
     plainRoot analysis
@@ -851,6 +866,187 @@ spec = describe "analysis" $ do
           analysis <- analyzeFile (root <> "/app/main.tynix") >>= expectRight
           analysisRoot analysis
             `shouldBe` Just (Scheme [] (TRecord (Map.fromList [("label", tString), ("value", tInt)])))
+      )
+
+  it "types an import from the sibling .tynix that compiles to that path" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ( "lib.tynix",
+          source
+            [ "let",
+              "  shout :: String -> String;",
+              "  shout = s: s + \"!\";",
+              "in { inherit shout; }"
+            ]
+        ),
+        ("main.tynix", "(import ./lib.nix).shout \"hi\"")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis) `shouldBe` Just "String"
+      )
+
+  it "rejects a use that disagrees with the sibling source" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ( "lib.tynix",
+          source
+            [ "let",
+              "  shout :: String -> String;",
+              "  shout = s: s + \"!\";",
+              "in { inherit shout; }"
+            ]
+        ),
+        ("main.tynix", "(import ./lib.nix).shout 1")
+      ]
+      ( \root ->
+          analyzeFile (root </> "main.tynix")
+            >>= (`expectLeftContaining` "TC0013")
+      )
+
+  it "prefers the sibling .tynix over a declaration of the same path" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1"),
+        ("lib.d.tynix", "declare \"./lib.nix\" { default :: String; };"),
+        ("main.tynix", "import ./lib.nix")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
+      )
+
+  it "keeps a string-literal import typed from the sibling source" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "{ value = 1; }"),
+        ("main.tynix", "(import \"./lib.nix\").value")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
+      )
+
+  it "types an ascribed import from the sibling source" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "{ value = 1; }"),
+        ("main.tynix", "(import ./lib.nix :: { value :: 1; })")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis)
+            `shouldBe` Just "{\n  value :: 1;\n}"
+      )
+
+  it "rejects an ascription that disagrees with the sibling source" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "{ value = 1; }"),
+        ("main.tynix", "(import ./lib.nix :: String)")
+      ]
+      ( \root ->
+          analyzeFile (root </> "main.tynix")
+            >>= (`expectLeftContaining` "type mismatch")
+      )
+
+  it "does not load a sibling source that the file does not import" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1 + \"nope\""),
+        ("main.tynix", "1")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          analysisRoot analysis `shouldBe` Just (Scheme [] (TLit (LInt 1)))
+      )
+
+  it "does not follow a sibling when a local binding shadows import" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1 + \"nope\""),
+        ("main.tynix", "let import = x: x; in import ./lib.nix")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Path"
+      )
+
+  it "does not follow a sibling when a rec set binds import" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1 + \"nope\""),
+        ("main.tynix", "(rec { import = x: x; value = import ./lib.nix; }).value")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis) `shouldBe` Just "Path"
+      )
+
+  it "still follows import inside a non-recursive set that names a field import" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1 + \"nope\""),
+        ("main.tynix", "{ import = x: x; value = import ./lib.nix; }")
+      ]
+      ( \root ->
+          analyzeFile (root </> "main.tynix")
+            >>= (`expectLeftContaining` "TC0013")
+      )
+
+  it "expands a file-local alias before publishing a sibling scheme" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ( "lib.tynix",
+          source
+            [ "type Label = String;",
+              "let",
+              "  shout :: Label -> Label;",
+              "  shout = s: s;",
+              "in { inherit shout; }"
+            ]
+        ),
+        ("main.tynix", "(import ./lib.nix).shout \"hi\"")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "main.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis) `shouldBe` Just "String"
+      )
+
+  it "reports a cycle through compiled sources" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("a.tynix", "import ./b.nix"),
+        ("b.tynix", "import ./a.nix")
+      ]
+      ( \root ->
+          analyzeFile (root </> "a.tynix")
+            >>= (`expectLeftContaining` "TD0009")
+      )
+
+  it "reports a sibling type error through the import" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("lib.tynix", "1 + \"x\""),
+        ("main.tynix", "import ./lib.nix")
+      ]
+      ( \root ->
+          analyzeFile (root </> "main.tynix")
+            >>= (`expectLeftContaining` "TC0013")
+      )
+
+  it "types a chain of compiled sources once" $
+    withTempTree
+      [ ("flake.nix", "{}"),
+        ("c.tynix", "{ value = 1; }"),
+        ("b.tynix", "import ./c.nix"),
+        ("a.tynix", "{ left = import ./b.nix; right = import ./c.nix; }")
+      ]
+      ( \root -> do
+          analysis <- analyzeFile (root </> "a.tynix") >>= expectRight
+          fmap renderScheme (analysisRoot analysis)
+            `shouldBe` Just
+              "{\n  left :: {\n    value :: 1;\n  };\n  right :: {\n    value :: 1;\n  };\n}"
       )
 
   it "gives a shared support cache the same answers as an uncached analysis" $

@@ -1,6 +1,6 @@
 {
   "name": "tynix",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "ubugeeei",
   "displayName": "tynix — TypeScript for Nix",
   "description": "Gradual types for Nix: syntax highlighting, diagnostics, hover, completion and more for .tynix, .d.tynix and .nix files via tynix-lsp.",

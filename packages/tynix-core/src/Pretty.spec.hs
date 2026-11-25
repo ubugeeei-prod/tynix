@@ -153,6 +153,13 @@ spec = do
       reparsed <- parseExprOrFail once
       renderExpr reparsed `shouldBe` once
 
+  describe "empty collections" $ do
+    it "prints an empty attribute set on one line" $
+      renderExpr (EAttrSet []) `shouldBe` "{ }"
+
+    it "prints an empty recursive attribute set on one line" $
+      renderExpr (ERec []) `shouldBe` "rec { }"
+
   describe "attribute names" $ do
     it "quotes and escapes names that are not bare identifiers" $ do
       renderExpr (EAttrSet [AttrField "with space" (EInt 1)])

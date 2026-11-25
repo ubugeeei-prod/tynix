@@ -56,6 +56,11 @@ This is the core bridge:
 - its surface is described once in a declaration,
 - typed code consumes that surface and is checked against it.
 
+When you do own the implementation, write it as `.tynix` and import the `.nix`
+path it compiles to. A sibling `lib.tynix` types `import ./lib.nix`; you do not
+restate that type in a `declare`. See
+[declarations](./tutorial/declarations.md#when-the-implementation-is-tynix).
+
 ## 4. Type the flake surface
 
 A flake can be converted to `flake.tynix` directly; see the

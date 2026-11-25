@@ -149,7 +149,7 @@ The algorithm is syntax-directed. The interesting rules:
 | `[ ... ]` | shape inference, see [indexed types](#indexed-types) |
 | `a // b` | record merge, right side wins; an unknown operand becomes an open row, so `x: x // { y = 1; }` is `{ ...t0 } -> { y :: 1; ...t0 }`; `TC0021` for non-records |
 | `a ++ b` | `List (join elemA elemB)`; `TC0020` for non-lists |
-| `+` | strings and paths concatenate (`Path + String` is a `Path`); otherwise numeric |
+| `+` | strings and paths concatenate (`Path + String` is a `Path`), including a union of a string or path with an unsolved meta such as `(x.a or "") + "b"`; otherwise numeric |
 | `- * /`, prefix `-` | numeric family arithmetic (`Nat`, `Int`, `Float`, `Number`); `Nat - x` widens to `Int` |
 | `< <= > >=` | both sides numeric or string; `TC0019` otherwise |
 | `== !=` | always `Bool` |
@@ -531,9 +531,18 @@ labels that are not string literals.
 - Aliases from all loaded declaration files share one namespace with the
   file's own aliases. Avoid defining the same alias name twice.
 
-`import` is typed only when its argument is a path literal or a string literal;
-the resolved absolute path is looked up in the world. Any other import, and any
-path without a declaration, is `dynamic`. `builtins` is the record declared by
+`import` is typed only when its argument is a path literal or a string literal.
+The resolved path is looked up in the world. Before that lookup, a path whose
+final extension is `.nix` (`./lib.nix`, not `./lib.d.tynix`) is paired with the
+sibling source `./lib.tynix` when that file exists. The sibling is checked and
+its root scheme, with file-local aliases expanded, **replaces** any `declare`
+for the same path. The implementation is the source of truth; a generated or
+handwritten declaration must not hide it. The sibling is read from disk, so an
+unsaved editor buffer types the imports it has saved. A local binding named
+`import` hides the builtin and does not consult the sibling, matching the
+checker. A cycle through these sibling sources is `TD0009`. Any other import,
+and any path with neither a sibling source nor a declaration, is `dynamic`.
+`builtins` is the record declared by
 the prelude (or by the workspace's own `declare "builtins"`), and the global
 builtins such as `toString`, `map`, `throw`, `import`, `derivation`,
 `baseNameOf`, `dirOf`, `fetchTarball`, `isNull`, `removeAttrs` and

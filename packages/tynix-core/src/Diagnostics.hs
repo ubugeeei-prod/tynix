@@ -81,6 +81,7 @@ data DiagnosticCode
   | TD0006ConfigBadItem
   | TD0007DeclarationOnlyCompile
   | TD0008DeclarationOnlyEmit
+  | TD0009CyclicCompiledImport
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 -- | Every code in the catalogue.
@@ -144,6 +145,7 @@ diagnosticCodeText code = case code of
   TD0006ConfigBadItem -> "TD0006"
   TD0007DeclarationOnlyCompile -> "TD0007"
   TD0008DeclarationOnlyEmit -> "TD0008"
+  TD0009CyclicCompiledImport -> "TD0009"
 
 -- | Prefix a message with the diagnostic code in the canonical
 -- @[Txxxxx] message@ shape used across the CLI and LSP.

@@ -92,6 +92,32 @@ Two consequences:
 - Without any workspace marker, only the `.d.tynix` files directly next to the
   checked file are loaded. Discovery never walks an arbitrary directory tree.
 
+## When the implementation is `.tynix`
+
+A declaration describes a `.nix` file you do not compile. When the
+implementation itself is a `.tynix` file, do not restate it. Name the compiled
+path in the import, and leave the source beside it:
+
+```tynix [lib.tynix]
+let
+  shout :: String -> String;
+  shout = s: s + "!";
+in { inherit shout; }
+```
+
+```tynix [main.tynix]
+(import ./lib.nix).shout "hi"
+```
+
+`tynix check main.tynix` reads `lib.tynix`, uses its checked type for
+`import ./lib.nix`, and rejects `shout 1`. `tynix compile lib.tynix -o lib.nix`
+writes the file Nix evaluates. A `declare "./lib.nix"` in the same workspace
+does not override that source. If the two files import each other, the check
+fails with `TD0009` instead of looping.
+
+Generated `.d.tynix` files remain the surface you publish for consumers who
+do not have the `.tynix` source. Inside the project, the source wins.
+
 ## Default exports
 
 If a module evaluates to something other than an attribute set, such as a

@@ -187,7 +187,10 @@ prettyExpr p = \case
       )
   -- Self-delimiting atoms never need outer parentheses; list/application
   -- operands are rendered tightly so nested calls and operators stay grouped.
+  -- An empty set is `{ }`. A blank line between the braces is what nixfmt keeps.
+  EAttrSet [] -> "{ }"
   EAttrSet items -> vsep ["{", indent 2 (vsep (map prettyAttr items)), "}"]
+  ERec [] -> "rec { }"
   ERec items -> vsep ["rec {", indent 2 (vsep (map prettyAttr items)), "}"]
   EList items -> "[" <+> hsep (map (prettyExpr 16) items) <+> "]"
   EInterp form parts -> prettyInterp form parts
