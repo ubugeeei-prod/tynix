@@ -57,7 +57,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(matrix.os, 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1
         with:
           persist-credentials: false
 
@@ -68,7 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -271,7 +271,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(vars.CI_RUNNER || 'ubuntu-latest', 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1
         with:
           persist-credentials: false
 
@@ -282,7 +282,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -365,7 +365,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: ./release-artifacts/*
           generate_release_notes: true
@@ -387,7 +387,7 @@ jobs:
     steps:
       - name: Check out sources (Blacksmith)
         if: ${{ startsWith(vars.CI_RUNNER || 'ubuntu-latest', 'blacksmith-') }}
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1
         with:
           persist-credentials: false
 
@@ -398,7 +398,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
